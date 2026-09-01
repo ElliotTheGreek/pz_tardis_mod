@@ -34,6 +34,7 @@ print(f"shape={C.Shape}  size={size}  chamfer={int(C.Chamfer)}  "
       f"floor squares={area} of {(size+1)**2}")
 print()
 land = C.Landing
+sonic = C.SonicBox
 for oy, row in enumerate(plan):
     line = ""
     for ox, inside in enumerate(row):
@@ -44,12 +45,16 @@ for oy, row in enumerate(plan):
             ch = "@"
         if ox == 12 and oy == 12:
             ch = "C"
+        if ox == int(sonic.x) and oy == int(sonic.y):
+            ch = "S"
         line += ch
     print("   " + line)
-print("\n   @ landing   o kept clear   C console   . floor")
+print("\n   @ landing   o kept clear   C console   S sonic case   . floor")
 
-# the landing, its clearance ring and the console must all be inside the room
-checks = [("landing", int(land.x), int(land.y)), ("console", 12, 12)]
+# the landing, its clearance ring, the console and the sonic case must all be
+# inside the room
+checks = [("landing", int(land.x), int(land.y)), ("console", 12, 12),
+          ("sonic case", int(sonic.x), int(sonic.y))]
 clear = int(land.clearance)
 for dx in (-clear, clear):
     for dy in (-clear, clear):
@@ -61,6 +66,13 @@ for label, ox, oy in checks:
 
 if area < (size + 1) ** 2 * 0.45:
     failures.append(f"floor plan keeps only {area} squares; chamfer too deep")
+
+# The sonic case is solid, so it must not land on the arrival spot or its
+# clearance ring -- that is the one placement that can strand a player.
+if C.isLanding(int(sonic.x), int(sonic.y)):
+    failures.append(f"sonic case at {int(sonic.x)},{int(sonic.y)} sits on the landing")
+if (int(sonic.x), int(sonic.y)) == (12, 12):
+    failures.append("sonic case sits on the console itself")
 
 # --- multi-tile pieces -------------------------------------------------
 print("\nmulti-tile pieces:")

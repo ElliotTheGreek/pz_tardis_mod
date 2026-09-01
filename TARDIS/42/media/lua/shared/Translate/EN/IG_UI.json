@@ -18,8 +18,9 @@
     "IGUI_TARDIS_DestinationSet": "Destination locked: %1, %2",
     "IGUI_TARDIS_NoDestination": "Choose a destination on the map first.",
     "IGUI_TARDIS_NoLandingSite": "No open ground could be found nearby",
-    "ItemName_TARDIS.TARDISPoliceBox": "TARDIS",
-    "ItemName_TARDIS.TARDISConsole": "TARDIS Console",
+    "IGUI_TARDIS_SonicOpened": "The sonic screwdriver whirrs; %1 lock(s) give way",
+    "IGUI_TARDIS_SonicVehicle": "The sonic screwdriver whirrs; %1 vehicle(s) unlock",
+    "IGUI_TARDIS_SonicVehicleReady": "The sonic screwdriver whirrs; %1 vehicle(s) unlock and turn over",
     "IGUI_TARDIS_ArrivalFailed": "The interior would not stabilise; you have been put back outside",
     "IGUI_TARDIS_MapHere": "TARDIS",
     "IGUI_TARDIS_MapDestination": "Destination"

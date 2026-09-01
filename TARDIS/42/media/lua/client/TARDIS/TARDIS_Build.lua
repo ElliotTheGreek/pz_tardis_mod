@@ -420,6 +420,26 @@ furnish.console = function(deck)
         end
     end
 
+    -- The case of sonic screwdrivers, stood beside the console where anyone
+    -- walking up from the landing will see it. Stocked with U.stockEach
+    -- rather than U.stock: there is exactly one item type in it and the read
+    -- back proves all three arrived rather than hoping they did.
+    local bx, by = at(deck, C.SonicBox.x, C.SonicBox.y)
+    if inShape(deck, C.SonicBox.x, C.SonicBox.y)
+       and not C.isLanding(C.SonicBox.x, C.SonicBox.y) then
+        local box, madeBox = U.addContainer(U.square(bx, by, deck.z, true),
+                                            S.crate, "sonic")
+        if box and (madeBox or C.DevRestock) then
+            local present = U.stockEach(box, { C.SonicItem }, C.SonicCount)
+            local n = present[C.SonicItem] or 0
+            if n < C.SonicCount then
+                U.log("sonic case holds %d of %d screwdrivers", n, C.SonicCount)
+            end
+        end
+    else
+        U.warnOnce("sonicBox", "C.SonicBox falls outside the console room")
+    end
+
     -- Corners that are furnished by hand below. The wall ring skips them so
     -- nothing ends up stacked two objects deep on one square.
     local function reserved(ox, oy)

@@ -16,8 +16,26 @@ items = set(json.load(open(os.path.join(CATALOG, "items.json")))["Base"])
 # a tile sprite looks like  some_tileset_name_01_42
 SPRITE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*_\d+$")
 ITEM = re.compile(r"^Base\.([A-Za-z0-9_]+)$")
+MOD_ITEM = re.compile(r"^TARDIS\.([A-Za-z0-9_]+)$")
+
+# The mod's own items, declared in media/scripts/tardis.txt. A Lua reference
+# to one that is not declared there resolves to nothing, exactly as silently
+# as a bad Base id does.
+script = open(os.path.join(MOD, "media", "scripts", "tardis.txt"),
+              encoding="utf-8").read()
+mod_items = set(re.findall(r"^\s*item\s+([A-Za-z0-9_]+)", script, re.M))
+mod_icons = set(re.findall(r"^\s*Icon\s*=\s*([A-Za-z0-9_]+)\s*,", script, re.M))
 
 failures, checked_sprites, checked_items = [], 0, 0
+
+# Every icon a mod item names has to exist as a file. A missing one shows as
+# a blank square in the inventory and reports nothing anywhere.
+for icon in sorted(mod_icons):
+    candidates = [os.path.join(MOD, "media", "textures", f"Item_{icon}.png"),
+                  os.path.join(MOD, "media", "ui", f"{icon}.png")]
+    if not any(os.path.exists(p) for p in candidates):
+        failures.append(f"tardis.txt: Icon = {icon} has no texture; "
+                        f"expected media/textures/Item_{icon}.png")
 
 for dp, _, fns in os.walk(os.path.join(MOD, "media", "lua")):
     for fn in fns:
@@ -33,6 +51,13 @@ for dp, _, fns in os.walk(os.path.join(MOD, "media", "lua")):
                     checked_items += 1
                     if m.group(1) not in items:
                         failures.append(f"{fn}:{lineno} unknown item {lit}")
+                    continue
+                m = MOD_ITEM.match(lit)
+                if m:
+                    checked_items += 1
+                    if m.group(1) not in mod_items:
+                        failures.append(f"{fn}:{lineno} {lit} is not declared "
+                                        f"in media/scripts/tardis.txt")
                     continue
                 if SPRITE.match(lit) and not lit.startswith("Base"):
                     checked_sprites += 1
@@ -62,7 +87,8 @@ for crop in re.findall(r'"([A-Za-z]+)"', block.group(1)):
     if crop not in crops_defined:
         failures.append(f"crop {crop} is not defined in farming_vegetableconf")
 
-print(f"checked {checked_sprites} sprite names and {checked_items} item ids")
+print(f"checked {checked_sprites} sprite names and {checked_items} item ids, "
+      f"{len(mod_items)} mod items and {len(mod_icons)} icons")
 if failures:
     print(f"\n{len(failures)} PROBLEM(S):")
     for f in failures:

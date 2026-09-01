@@ -13,7 +13,7 @@ TARDIS = TARDIS or {}
 local C = {}
 TARDIS.Config = C
 
-C.Version   = "1.7.0"
+C.Version   = "1.8.0"
 C.StateKey  = "TARDIS_State_v1"
 C.ModPrefix = "[TARDIS]"
 
@@ -21,7 +21,7 @@ C.ModPrefix = "[TARDIS]"
 -- are generated. Decks built at an older revision are quietly brought up to
 -- date the next time the player stands on them; the rebuild preserves
 -- furniture, stored items and crops.
-C.BuildRev = 9
+C.BuildRev = 10
 
 -- Radius, in tiles, of the field that holds the dead back from the doors.
 C.FieldRadius = 10
@@ -232,6 +232,47 @@ C.Sprites = {
 -- media/scripts/tardis.txt.
 C.ExteriorItem = "TARDIS.TARDISPoliceBox"
 C.ConsoleItem  = "TARDIS.TARDISConsole"
+
+---------------------------------------------------------------------------
+-- The sonic screwdriver
+---------------------------------------------------------------------------
+-- Carrying one opens locks. TARDIS_Sonic.lua sweeps the squares around
+-- whoever is holding it and unlocks every door, gate, window and vehicle it
+-- finds; it has no other use and needs no action from the player.
+--
+-- Two names for one item: the engine's inventory search compares the bare
+-- type, while anything that spawns or places the item wants the full id.
+C.SonicItem = "TARDIS.TARDISSonicScrewdriver"
+C.SonicType = "TARDISSonicScrewdriver"
+
+-- How far the field reaches, in tiles, on the carrier's own level. Every
+-- square inside it is examined on each sweep, so this is the number that
+-- decides what a sweep costs; 15 is a good-sized house in every direction.
+C.SonicRadius = 15
+
+-- What the field does to a vehicle once its doors are open. Unlocking alone
+-- gets you into a car you still cannot drive, so the field also bypasses the
+-- ignition and puts a charge in the battery.
+--
+-- Hotwiring is what the game itself gates "Start Engine" on. The battery is
+-- separate and worth its own switch: most abandoned cars are flat, and a
+-- hotwired car with a dead battery still does nothing at all.
+--
+-- Neither touches fuel. An empty tank stays empty -- that is not a lock and
+-- not an ignition, and a car that drives forever on nothing is a different
+-- mod.
+C.SonicHotwire   = true
+C.SonicJumpStart = true
+
+-- Sweeps run when the carrier steps onto a new square, and otherwise no more
+-- often than this many ticks apart, so standing still is nearly free.
+C.SonicInterval = 120
+
+-- Where the case of screwdrivers sits in the console room, and how many are
+-- in it. Just east of the console, off the rug and in plain sight of anyone
+-- walking up from the landing.
+C.SonicBox   = { x = 15, y = 12 }
+C.SonicCount = 3
 
 C.Loot = {}
 

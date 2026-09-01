@@ -247,6 +247,37 @@ local function buildSteps(player)
             checkDeckSite(index)
             return DONE
         end)
+
+        -- Only checkable while the console deck is the one streamed in, so
+        -- it rides along with that deck rather than waiting until the end.
+        if index == 1 then
+            add("sonic case", function()
+                local rx, ry = U.deckOrigin(deck)
+                local sq = U.square(rx + C.SonicBox.x, ry + C.SonicBox.y, deck.z, false)
+                local held = 0
+                if sq then
+                    U.eachObject(sq, function(o)
+                        local md = o:getModData()
+                        if not (md and md.TARDIS == "sonic") then return end
+                        local c = U.containerOf(o)
+                        if not c then return end
+                        U.try("sonicItems", function()
+                            local items = c:getItems()
+                            for i = 0, items:size() - 1 do
+                                local it = items:get(i)
+                                if it and it:getFullType() == C.SonicItem then
+                                    held = held + 1
+                                end
+                            end
+                        end)
+                    end)
+                end
+                check("sonic.case", held == C.SonicCount,
+                      "expected " .. C.SonicCount .. " screwdrivers beside the console, found "
+                      .. held)
+                return DONE
+            end)
+        end
     end
 
     add("water", function()
@@ -314,6 +345,86 @@ local function buildSteps(player)
     add("outside", function()
         if U.isInteriorPlayer(player) then return WAIT end
         check("doors.outside", true)
+        return DONE
+    end)
+
+    -- Prove the field actually turns a lock. It has to run out here: nothing
+    -- inside the ship is locked, so there is nothing in there to open.
+    add("sonic field", function()
+        local px = math.floor(player:getX())
+        local py = math.floor(player:getY())
+        local pz = math.floor(player:getZ())
+
+        -- One pass for both: the nearest door to lock and test with, and any
+        -- vehicle in reach to assert the state of afterwards.
+        local door, car = nil, nil
+        for r = 1, C.SonicRadius do
+            for dx = -r, r do
+                for dy = -r, r do
+                    local dsq = (not door or not car)
+                                and U.square(px + dx, py + dy, pz, false) or nil
+                    if dsq and not door then
+                        door = U.try("sonicDoor", function()
+                            return dsq:getIsoDoor()
+                        end) or nil
+                    end
+                    if dsq and not car then
+                        car = U.try("sonicCar", function()
+                            return dsq:getVehicleContainer()
+                        end) or nil
+                    end
+                end
+            end
+        end
+
+        if not door then
+            info("sonic: no door within %d tiles to test against", C.SonicRadius)
+            return DONE
+        end
+
+        U.try("sonicLock", function() door:setLockedByKey(true) end)
+        local before = U.try("sonicWasLocked", function()
+            return door:isLockedByKey()
+        end) == true
+        local t = TARDIS.Sonic.sweepAt(px, py, pz)
+        local after = U.try("sonicNowLocked", function()
+            return door:isLockedByKey() or door:isLocked()
+        end) == true
+
+        check("sonic.locks", before, "could not lock a door to test with")
+        check("sonic.unlocks", before and not after,
+              "still locked after a sweep that opened " .. t.doors)
+        info("sonic: sweep opened %d lock(s) within %d tiles; %d vehicle(s) found, "
+             .. "%d unlocked, %d hotwired, %d jumped",
+             t.doors, C.SonicRadius, t.found, t.vehicles, t.hotwired, t.jumped)
+
+        -- Assert the vehicle's *state*, not what this sweep changed: a
+        -- passive sweep may well have got to it first, which would leave the
+        -- deltas at zero with everything working perfectly.
+        if car then
+            local locked = U.try("carLocked", function()
+                return car:isAnyDoorLocked()
+            end) == true
+            check("sonic.vehicleUnlocked", not locked, "vehicle still locked")
+
+            if C.SonicHotwire then
+                local wired = U.try("carHotwired", function()
+                    return car:isHotwired() and not car:isHotwiredBroken()
+                end) == true
+                check("sonic.vehicleHotwired", wired, "vehicle ignition not bypassed")
+            end
+            if C.SonicJumpStart then
+                local live = U.try("carBattery", function()
+                    return car:hasLiveBattery()
+                end) == true
+                -- A car with no battery fitted cannot be jumped, and that is
+                -- not a failure of the field.
+                check("sonic.vehicleBattery", live or t.noBattery > 0,
+                      "battery still flat and one is fitted")
+            end
+        else
+            info("sonic: no vehicle within %d tiles to test against", C.SonicRadius)
+        end
         return DONE
     end)
 
