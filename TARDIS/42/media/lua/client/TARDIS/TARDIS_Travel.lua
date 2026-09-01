@@ -354,9 +354,14 @@ end
 function TARDISTravelWindow:close()
     T.picking = false
     T.window = nil
-    U.try("restoreShowPlayers", function()
-        if ISWorldMap_instance and T.restoreShowPlayers ~= nil then
-            ISWorldMap_instance:setShowPlayers(T.restoreShowPlayers)
+    U.try("restoreMapSettings", function()
+        local map = ISWorldMap_instance
+        if not map then return end
+        if T.restoreShowPlayers ~= nil then
+            map:setShowPlayers(T.restoreShowPlayers)
+        end
+        if T.restoreHideUnvisited ~= nil then
+            map:setHideUnvisitedAreas(T.restoreHideUnvisited)
         end
     end)
     ISCollapsableWindow.close(self)
@@ -398,6 +403,14 @@ function T.openConsole(player)
         -- replaces it while the console is open
         T.restoreShowPlayers = map.showPlayers
         map:setShowPlayers(false)
+
+        -- Lift the fog for the duration. A ship that can go anywhere is not
+        -- much use if you can only aim it at places you have already walked
+        -- to, and the whole point of the console is picking somewhere new.
+        -- The setting is restored on close, so the ordinary map keeps its
+        -- fog and nothing about exploration is given away permanently.
+        T.restoreHideUnvisited = map.hideUnvisitedAreas
+        map:setHideUnvisitedAreas(false)
     end)
 
     T.picking = true

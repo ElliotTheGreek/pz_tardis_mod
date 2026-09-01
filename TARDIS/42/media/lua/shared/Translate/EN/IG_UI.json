@@ -14,7 +14,7 @@
     "IGUI_TARDIS_UseBookmark": "Set as destination",
     "IGUI_TARDIS_DeleteBookmark": "Delete",
     "IGUI_TARDIS_NameBookmark": "Name this location:",
-    "IGUI_TARDIS_PickPrompt": "Click anywhere on the map to choose where to land, or pick a saved location below. The ship arrives when you next step outside.",
+    "IGUI_TARDIS_PickPrompt": "Click anywhere on the map to choose where to land, or pick a saved location below. The whole map is shown while the console is open. The ship arrives when you next step outside.",
     "IGUI_TARDIS_DestinationSet": "Destination locked: %1, %2",
     "IGUI_TARDIS_NoDestination": "Choose a destination on the map first.",
     "IGUI_TARDIS_NoLandingSite": "No open ground could be found nearby",

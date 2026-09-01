@@ -321,6 +321,42 @@ local function skillBookList()
 end
 
 ---------------------------------------------------------------------------
+-- The armoury
+---------------------------------------------------------------------------
+-- Five crates, deliberately packed rather than seeded: every firearm the
+-- build ships, every magazine, every calibre in every packaging, and the
+-- optics to go on them. A military crate holds fifty, so each is filled.
+local ARMOURY = {
+    { loot = C.Loot.firearms,    amount = 34, tag = "armoury.guns" },
+    { loot = C.Loot.firearms,    amount = 34, tag = "armoury.guns" },
+    { loot = C.Loot.gunMags,     amount = 36, tag = "armoury.mags" },
+    { loot = C.Loot.gunAmmo,     amount = 42, tag = "armoury.ammo" },
+    { loot = C.Loot.attachments, amount = 24, tag = "armoury.optics" },
+}
+
+--- Places the armoury crates at the given offsets. Returns how many landed.
+local function armouryBay(deck, spots)
+    local placed = 0
+    for i, spec in ipairs(ARMOURY) do
+        local spot = spots[i]
+        if spot and inShape(deck, spot[1], spot[2])
+           and not C.isLanding(spot[1], spot[2]) then
+            local x, y = at(deck, spot[1], spot[2])
+            local obj, made = U.addContainer(U.square(x, y, deck.z, true),
+                                             C.Sprites.crate, spec.tag)
+            if obj then
+                placed = placed + 1
+                if made or C.DevRestock then
+                    U.stock(obj, spec.loot, spec.amount)
+                end
+            end
+        end
+    end
+    U.debug("%s: %d armoury crates", deck.id, placed)
+    return placed
+end
+
+---------------------------------------------------------------------------
 -- Deck dressing
 ---------------------------------------------------------------------------
 local furnish = {}
@@ -428,11 +464,16 @@ furnish.console = function(deck)
     local clx, cly = at(deck, 14, 4)
     U.addObject(U.square(clx, cly, deck.z, true), S.clock.S, "clock")
 
+    -- The armoury, on the deck you actually arrive on, along the east wall
+    -- where there is room for a rank of crates.
+    armouryBay(deck, { { 16, 14 }, { 18, 14 }, { 20, 14 },
+                       { 16, 16 }, { 18, 16 } })
+
     -- large stores, the things a traveller actually hauls about
-    line(deck, S.crate, 17, 20, 1, 0, 4,
-         { loot = C.Loot.tools, amount = 10, tag = "crate" })
-    line(deck, S.metalShelf.N, 8, 20, 1, 0, 5,
+    line(deck, S.metalShelf.N, 7, 20, 1, 0, 4,
          { loot = C.Loot.food, amount = 8, tag = "rack" })
+    line(deck, S.locker.N, 16, 20, 1, 0, 3,
+         { loot = C.Loot.tools, amount = 10, tag = "locker" })
 end
 
 --- Habitation.
@@ -512,40 +553,14 @@ furnish.storage = function(deck)
     line(deck, S.locker.S, 16, 4, 0, 2, 6,
          { loot = C.Loot.medical, amount = 8, tag = "locker" })
 
-    ---------------------------------------------------------------------
-    -- The armoury
-    ---------------------------------------------------------------------
-    local armoury = {
-        { loot = C.Loot.firearms,    amount = 34, tag = "armoury.guns" },
-        { loot = C.Loot.firearms,    amount = 34, tag = "armoury.guns" },
-        { loot = C.Loot.gunMags,     amount = 36, tag = "armoury.mags" },
-        { loot = C.Loot.gunAmmo,     amount = 42, tag = "armoury.ammo" },
-        { loot = C.Loot.gunAmmo,     amount = 42, tag = "armoury.ammo" },
-        { loot = C.Loot.attachments, amount = 24, tag = "armoury.optics" },
-    }
-    local placed = 0
-    for i, spec in ipairs(armoury) do
-        local ox, oy = 5 + (i - 1) * 3, 23
-        local x, y = at(deck, ox, oy)
-        if inShape(deck, ox, oy) and not C.isLanding(ox, oy) then
-            local obj, made = U.addContainer(U.square(x, y, deck.z, true),
-                                             S.crate, spec.tag)
-            if obj then
-                placed = placed + 1
-                if made or C.DevRestock then
-                    U.stock(obj, spec.loot, spec.amount)
-                end
-            end
-        end
-    end
+    -- a second armoury down here, where the bulk stores live
+    armouryBay(deck, { { 5, 23 }, { 8, 23 }, { 11, 23 }, { 14, 23 }, { 17, 23 } })
 
     -- gun racks on the wall behind the crates
     line(deck, S.metalShelf.N, 6, 21, 2, 0, 6,
          { loot = C.Loot.firearms, amount = 8, tag = "armoury.rack" })
     line(deck, S.locker.N, 18, 21, 1, 0, 3,
          { loot = C.Loot.gunAmmo, amount = 20, tag = "armoury.locker" })
-
-    U.debug("storage: %d armoury crates", placed)
 end
 
 --- Library: skill books, magazines and tapes.

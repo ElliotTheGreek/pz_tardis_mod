@@ -13,7 +13,7 @@ TARDIS = TARDIS or {}
 local C = {}
 TARDIS.Config = C
 
-C.Version   = "1.5.0"
+C.Version   = "1.6.0"
 C.StateKey  = "TARDIS_State_v1"
 C.ModPrefix = "[TARDIS]"
 
@@ -21,7 +21,7 @@ C.ModPrefix = "[TARDIS]"
 -- are generated. Decks built at an older revision are quietly brought up to
 -- date the next time the player stands on them; the rebuild preserves
 -- furniture, stored items and crops.
-C.BuildRev = 7
+C.BuildRev = 8
 
 -- Radius, in tiles, of the field that holds the dead back from the doors.
 C.FieldRadius = 10
