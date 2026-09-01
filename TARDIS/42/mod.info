@@ -1,0 +1,8 @@
+name=TARDIS
+id=TARDIS
+poster=poster.png
+description=A working TARDIS. Right-click any free tile to materialise the police box, right-click the box to step inside, and find a bigger-on-the-inside silo of six decks: control room, habitation, stores, library, galley and hydroponics, joined by a stair core. Fly it from the console using the world map or a saved bookmark.
+author=built for Arcade
+category=build
+versionMin=42.0
+modversion=1.0.0
