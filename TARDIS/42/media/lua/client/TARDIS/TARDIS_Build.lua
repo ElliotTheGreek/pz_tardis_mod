@@ -326,15 +326,23 @@ end
 -- Five crates, deliberately packed rather than seeded: every firearm the
 -- build ships, every magazine, every calibre in every packaging, and the
 -- optics to go on them. A military crate holds fifty, so each is filled.
+-- Ammunition gets two crates rather than one. A container has a capacity,
+-- and once it is full the engine drops further items silently -- which is how
+-- a crate meant to hold every calibre ended up short of 5.56 and .45. Fewer
+-- copies spread over more crates keeps every type present.
 local ARMOURY = {
-    { loot = C.Loot.firearms,    amount = 34, tag = "armoury.guns" },
-    { loot = C.Loot.firearms,    amount = 34, tag = "armoury.guns" },
-    { loot = C.Loot.gunMags,     amount = 36, tag = "armoury.mags" },
-    { loot = C.Loot.gunAmmo,     amount = 42, tag = "armoury.ammo" },
-    { loot = C.Loot.attachments, amount = 24, tag = "armoury.optics" },
+    { loot = C.Loot.firearms,    copies = 2, tag = "armoury.guns" },
+    { loot = C.Loot.gunMags,     copies = 4, tag = "armoury.mags" },
+    { loot = C.Loot.gunAmmo,     copies = 1, tag = "armoury.ammo" },
+    { loot = C.Loot.gunAmmo,     copies = 1, tag = "armoury.ammo" },
+    { loot = C.Loot.attachments, copies = 3, tag = "armoury.optics" },
 }
 
 --- Places the armoury crates at the given offsets. Returns how many landed.
+---
+--- Uses U.stockEach, which puts one of everything in and then reads the
+--- container back, so a calibre the engine refused is reported rather than
+--- quietly absent.
 local function armouryBay(deck, spots)
     local placed = 0
     for i, spec in ipairs(ARMOURY) do
@@ -347,7 +355,11 @@ local function armouryBay(deck, spots)
             if obj then
                 placed = placed + 1
                 if made or C.DevRestock then
-                    U.stock(obj, spec.loot, spec.amount)
+                    local _, missing = U.stockEach(obj, spec.loot, spec.copies)
+                    if #missing > 0 then
+                        U.log("armoury %s on %s could not hold: %s",
+                              spec.tag, deck.id, table.concat(missing, ", "))
+                    end
                 end
             end
         end
@@ -408,6 +420,15 @@ furnish.console = function(deck)
         end
     end
 
+    -- Corners that are furnished by hand below. The wall ring skips them so
+    -- nothing ends up stacked two objects deep on one square.
+    local function reserved(ox, oy)
+        return (ox >= 3 and ox <= 11 and oy >= 3 and oy <= 11)      -- living corner
+            or (ox >= 3 and ox <= 11 and oy >= 17 and oy <= 22)     -- galley corner
+            or (ox >= 14 and ox <= 22 and oy >= 12 and oy <= 18)    -- armoury bay
+            or (ox >= 14 and ox <= 20 and oy >= 19 and oy <= 22)    -- stores
+    end
+
     -- Dress the wall. The ring follows the octagon, so this fills all eight
     -- walls without a single hand-placed coordinate.
     local ring = wallRing(deck, 1)
@@ -424,7 +445,8 @@ furnish.console = function(deck)
         { kind = "gap" },
     }
     for i, spot in ipairs(ring) do
-        if not C.isLanding(spot.ox, spot.oy) then
+        if not C.isLanding(spot.ox, spot.oy)
+           and not reserved(spot.ox, spot.oy) then
             local entry = pattern[((i - 1) % #pattern) + 1]
             local f = spot.facing
             local sx, sy = at(deck, spot.ox, spot.oy)
@@ -469,9 +491,31 @@ furnish.console = function(deck)
     armouryBay(deck, { { 16, 14 }, { 18, 14 }, { 20, 14 },
                        { 16, 16 }, { 18, 16 } })
 
-    -- large stores, the things a traveller actually hauls about
-    line(deck, S.metalShelf.N, 7, 20, 1, 0, 4,
-         { loot = C.Loot.food, amount = 8, tag = "rack" })
+    -- A galley corner in the south-west, so the deck you live on can feed
+    -- you without a trip down to the galley proper.
+    local function fit(ox, oy, sprite, tag, loot, amount)
+        if not inShape(deck, ox, oy) or C.isLanding(ox, oy) then return end
+        local fx, fy = at(deck, ox, oy)
+        local sq = U.square(fx, fy, deck.z, true)
+        if not loot then
+            U.addObject(sq, sprite, tag)
+            return
+        end
+        local obj, made = U.addContainer(sq, sprite, tag)
+        if obj and (made or C.DevRestock) then U.stock(obj, loot, amount) end
+    end
+
+    fit(4, 18, S.sink.W, "sink")
+    fit(4, 19, S.counter.N, "counter", C.Loot.cookware, 6)
+    fit(5, 20, S.oven.N, "oven")
+    fit(6, 20, S.microwave.N, "microwave", C.Loot.food, 3)
+    fit(7, 20, S.counter.N, "counter", C.Loot.cookware, 6)
+    fit(8, 20, S.fridge.N, "fridge", C.Loot.food, 12)
+    fit(9, 20, S.fridge.N, "fridge", C.Loot.food, 12)
+    line(deck, S.counter.N, 4, 21, 1, 0, 6,
+         { loot = C.Loot.food, amount = 10, tag = "pantry" })
+
+    -- general stores along the south-east
     line(deck, S.locker.N, 16, 20, 1, 0, 3,
          { loot = C.Loot.tools, amount = 10, tag = "locker" })
 end

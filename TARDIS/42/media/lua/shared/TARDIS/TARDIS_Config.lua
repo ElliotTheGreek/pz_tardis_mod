@@ -13,7 +13,7 @@ TARDIS = TARDIS or {}
 local C = {}
 TARDIS.Config = C
 
-C.Version   = "1.6.0"
+C.Version   = "1.7.0"
 C.StateKey  = "TARDIS_State_v1"
 C.ModPrefix = "[TARDIS]"
 
@@ -21,7 +21,7 @@ C.ModPrefix = "[TARDIS]"
 -- are generated. Decks built at an older revision are quietly brought up to
 -- date the next time the player stands on them; the rebuild preserves
 -- furniture, stored items and crops.
-C.BuildRev = 8
+C.BuildRev = 9
 
 -- Radius, in tiles, of the field that holds the dead back from the doors.
 C.FieldRadius = 10
@@ -206,6 +206,8 @@ C.Sprites = {
     chest    = { S = "furniture_storage_02_28", E = "furniture_storage_02_29",
                  N = "furniture_storage_02_30", W = "furniture_storage_02_31" },
     rug      = "floors_rugs_01_16",
+    microwave = { S = "appliances_cooking_01_25", E = "appliances_cooking_01_24",
+                  W = "appliances_cooking_01_26", N = "appliances_cooking_01_27" },
 
     metalShelf = { S = "furniture_shelving_01_28", E = "furniture_shelving_01_29",
                    W = "furniture_shelving_01_30", N = "furniture_shelving_01_31" },

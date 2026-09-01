@@ -349,6 +349,46 @@ function U.resetStockCursors()
     stockCursor = {}
 end
 
+--- Puts `copies` of every entry in `list` into a container, then checks what
+--- actually arrived and returns the ids that did not.
+---
+--- U.stock walks a list and hopes; this guarantees coverage and then proves
+--- it. Containers have a capacity, and once it is reached the engine drops
+--- further items without raising anything, so a crate meant to hold every
+--- calibre can quietly end up holding a handful. Anything that fails to land
+--- is returned so the caller can log it rather than leave a hole nobody
+--- notices until they go looking for 5.56 and it is not there.
+function U.stockEach(obj, list, copies)
+    local container = U.containerOf(obj)
+    if not container or not list then return {}, list or {} end
+    copies = copies or 1
+
+    for _, id in ipairs(list) do
+        for _ = 1, copies do
+            U.try("AddItems:" .. id, function() return container:AddItems(id, 1) end)
+        end
+    end
+
+    local present = {}
+    U.try("readBack", function()
+        local items = container:getItems()
+        if not items then return end
+        for i = 0, items:size() - 1 do
+            local it = items:get(i)
+            if it then
+                local t = it:getFullType()
+                present[t] = (present[t] or 0) + 1
+            end
+        end
+    end)
+
+    local missing = {}
+    for _, id in ipairs(list) do
+        if not present[id] then table.insert(missing, id) end
+    end
+    return present, missing
+end
+
 ---------------------------------------------------------------------------
 -- Misc
 ---------------------------------------------------------------------------

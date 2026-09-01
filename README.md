@@ -20,6 +20,7 @@ The meshes and textures are produced by scripts in `tools/`.
 | **Infinite water** | Sinks, showers and toilets are refilled every ten in-game minutes. |
 | **Stocked out** | Racks of tools and medicine; every volume of every skill book in the game; magazines and tapes; food, cookware and a pantry. |
 | **An armoury** | Five packed crates in the console room, and a second bay with gun racks on the stores deck: every firearm the build ships, every magazine, every calibre of ammunition in every packaging, and the optics to go with them. |
+| **A galley corner** | Sink, oven, microwave, fridges and stocked cabinets in the console room, so the deck you live on can feed you. |
 | **A working farm** | Sown and plowed plots under grow lamps, seed stores, and livestock. |
 | **Fly it** | The world map doubles as the flight console. Click a destination or pick a bookmark; the ship lands on the nearest open ground when you next step outside. |
 | **No fog at the console** | The map is fully revealed while the flight console is open, so you can aim at somewhere you have never been. Your ordinary map keeps its fog. |
