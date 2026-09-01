@@ -141,6 +141,13 @@ chunk returns an orphan square, and the first engine call touching it throws.
 everything. Arrival moves the player **first**, holds them safe, and builds
 once the chunks appear.
 
+**The same goes for removing things.** `U.square(x, y, z, false)` returns `nil`
+for an unloaded chunk, and a function that reads that as "nothing there" is
+wrong: it means "cannot tell yet". Return a reason, not a boolean, and write
+the position down to retry when the world catches up — `s.ghosts` and
+`Core.sweepGhosts` are the pattern. This is why a second police box stood at
+every place the ship had ever been.
+
 ### Never put a deck above another deck
 
 PZ draws every level above the player and only hides overhead levels inside a
@@ -207,6 +214,7 @@ Learn these; they map to causes that are not obvious from the symptom.
 | **Furniture looks mismatched or doubled** | Multi-tile offsets wrong (`SpriteGridPos`), or two placement passes hitting one square. `tests/test_layout.py` checks the first. |
 | **Interior looks like a tower in a forest** | The margin clearing did not run or the chunks streamed in late. It re-runs on every rebuild. |
 | **Half a feature works and the other half is silent** | A wrong engine call on the silent path. One `[TARDIS] WARN` line names it, and the Java stack traces under it give the file and line. `grep -E "\[TARDIS\] WARN" console.txt` first, always — it is one line and it is the answer. |
+| **Two of something that should be unique** | Something was removed at a position whose chunk was not loaded, and the failure was read as success. `TARDIS_Ghosts()` lists shells known to be pending and forces a sweep. |
 
 ---
 
@@ -238,7 +246,8 @@ which is unwelcome mid-game. `TARDIS_SelfTest()` from the debug console forces
 it. `TARDIS_Rebuild()` tears down and regenerates the deck you are standing on,
 fully restocked, for design iteration. `TARDIS_Sonic()` forces one lock sweep
 where you stand and reports how many locks gave way, without needing to be
-carrying a screwdriver.
+carrying a screwdriver. `TARDIS_Ghosts()` lists old shells still waiting to be
+cleared and sweeps up any near you.
 
 ### Watching the log
 
@@ -302,14 +311,20 @@ its side), and **1 unit is 1 tile**, with `scale` set in
 
 ## Current state
 
-Version **1.8.0**, build revision **10**.
+Version **1.8.1**, build revision **10**.
 
 Working and confirmed in game: summoning, enter/exit, all six decks
 generating, container stocking, water, crops, travel by map, bookmarks, the
 void margin, the repulsion field.
 
 Confirmed in game since: the sonic screwdriver's item, its case beside the
-console, the lock sweep on doors, and vehicle unlocking.
+console, the lock sweep on doors, vehicle unlocking, hotwiring and the battery
+jump.
+
+1.8.1 fixes the shell not being lifted when the ship moved somewhere its old
+chunk was not loaded — every flight left a police box behind. Worlds played
+before the fix have strays nothing wrote down; `Core.sweepStrays` removes them
+when a player walks within ten tiles, and `TARDIS_Ghosts()` forces it.
 
 Confirmed by static checks but **not yet seen in game at the time of writing**:
 the octagonal room shape, the redressed console room, the armoury, the galley

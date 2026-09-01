@@ -72,6 +72,19 @@ So the order is always **move the player in first, then build**:
 
 **Never build at a location no player is at.**
 
+And the corollary, which is easier to miss: **you cannot un-build there
+either.** Anything that reaches for a remembered position — to remove, check
+or repair it — gets `nil` back when that chunk is not loaded, and `nil` is not
+"there is nothing there". It means "ask again later".
+
+The shell is the worked example. Materialising lifts the box from wherever it
+was, but a landing site is by definition nowhere near where the ship has been,
+so at that moment the old chunk is never loaded. Treating that failure as "the
+old shell is gone" left a second box standing after every flight.
+`Core.removeExteriorAt` returns a *reason* rather than a bare boolean for
+exactly this, and a position it could not reach goes into `s.ghosts` to be
+cleared when the world next streams that spot in.
+
 ### 2. Decks may not sit above one another
 
 Project Zomboid draws every z level above the player. It hides the ones

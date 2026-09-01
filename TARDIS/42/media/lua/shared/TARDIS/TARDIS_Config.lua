@@ -13,7 +13,7 @@ TARDIS = TARDIS or {}
 local C = {}
 TARDIS.Config = C
 
-C.Version   = "1.8.0"
+C.Version   = "1.8.1"
 C.StateKey  = "TARDIS_State_v1"
 C.ModPrefix = "[TARDIS]"
 

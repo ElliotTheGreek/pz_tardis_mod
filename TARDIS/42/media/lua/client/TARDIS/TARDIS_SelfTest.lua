@@ -212,6 +212,88 @@ local function buildSteps(player)
         return DONE
     end)
 
+    -- Materialising again must lift the old shell, not leave it standing.
+    -- Two halves, because they fail for different reasons: the ordinary move,
+    -- and the repair path for a shell whose chunk was not loaded at the time.
+    add("rematerialise", function()
+        local s = U.state()
+        local oldX, oldY, oldZ = s.x, s.y, s.z
+
+        -- somewhere else nearby to move it to
+        local target = nil
+        for r = 2, 8 do
+            for dx = -r, r do
+                for dy = -r, r do
+                    local sq = U.square(oldX + dx, oldY + dy, oldZ, false)
+                    if not target and sq and (sq:getX() ~= oldX or sq:getY() ~= oldY)
+                       and TARDIS.Core.canMaterialise(sq) then
+                        target = sq
+                    end
+                end
+            end
+        end
+        if not target then
+            info("rematerialise: nowhere else to move the shell to")
+            return DONE
+        end
+
+        check("doors.rematerialise",
+              TARDIS.Core.materialise(target, player) == true, "returned false")
+
+        local oldSq = U.square(oldX, oldY, oldZ, false)
+        check("doors.oldShellGone",
+              oldSq ~= nil and TARDIS.Core.exteriorOn(oldSq) == nil,
+              "a shell is still standing at " .. oldX .. "," .. oldY)
+
+        -- and exactly one in the whole area, not two
+        local shells = 0
+        for dx = -12, 12 do
+            for dy = -12, 12 do
+                local sq = U.square(oldX + dx, oldY + dy, oldZ, false)
+                if sq and TARDIS.Core.exteriorOn(sq) then shells = shells + 1 end
+            end
+        end
+        check("doors.oneShell", shells == 1, shells .. " shells found, expected 1")
+
+        -- The repair path. Stand a decoy shell somewhere the ship is not,
+        -- write it down the way a flight would, and prove the sweep clears
+        -- it. This is the half that was broken: an unreachable shell used to
+        -- be forgotten rather than remembered.
+        local decoy = nil
+        for r = 2, 8 do
+            for dx = -r, r do
+                for dy = -r, r do
+                    local sq = U.square(s.x + dx, s.y + dy, s.z, false)
+                    if not decoy and sq and TARDIS.Core.canMaterialise(sq) then
+                        decoy = sq
+                    end
+                end
+            end
+        end
+        if not decoy then
+            info("rematerialise: no room to stand a decoy shell")
+            return DONE
+        end
+
+        U.try("decoy", function()
+            decoy:AddWorldInventoryItem(C.ExteriorItem, 0.5, 0.5, 0.0)
+        end)
+        local dx, dy, dz = decoy:getX(), decoy:getY(), decoy:getZ()
+        check("doors.decoyPlaced", TARDIS.Core.exteriorOn(decoy) ~= nil,
+              "could not stand a decoy shell to test the sweep")
+
+        TARDIS.Core.forgetExterior(dx, dy, dz)
+        local pending = #s.ghosts
+        check("doors.ghostRecorded", pending > 0, "the shell was not written down")
+
+        TARDIS.Core.sweepGhosts()
+        check("doors.ghostSwept", TARDIS.Core.exteriorOn(decoy) == nil,
+              "the sweep left the shell at " .. dx .. "," .. dy)
+        check("doors.ghostListCleared", #s.ghosts == 0,
+              #s.ghosts .. " entries left in the ghost list")
+        return DONE
+    end)
+
     add("enter", function()
         check("doors.enter", TARDIS.Core.enter(player) == true, "enter returned false")
         return DONE

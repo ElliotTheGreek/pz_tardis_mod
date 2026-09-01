@@ -58,16 +58,114 @@ function Core.currentExterior()
     return Core.exteriorOn(sq), sq
 end
 
---- Takes the shell off its square. Returns true if something was removed.
+--- Takes the shell off its square.
+---
+--- Returns `removed, reason`, and the reason is the point of it: "unloaded"
+--- means the answer is not knowable yet, which is very different from
+--- "absent" meaning there is nothing there. Treating those two the same is
+--- what left a second box standing every time the ship flew -- a landing site
+--- is far from where the ship was, so the old chunk is never streamed in at
+--- the moment the new shell goes down.
 function Core.removeExteriorAt(x, y, z)
+    if not U.chunkLoaded(x, y, z) then return false, "unloaded" end
     local sq = U.square(x, y, z, false)
-    if not sq then return false end
+    if not sq then return false, "unloaded" end
     local obj = Core.exteriorOn(sq)
-    if not obj then return false end
-    return U.try("removeExterior", function()
+    if not obj then return false, "absent" end
+    local ok = U.try("removeExterior", function()
         sq:removeWorldObject(obj)
         return true
     end) == true
+    return ok, ok and "removed" or "failed"
+end
+
+---------------------------------------------------------------------------
+-- Shells left behind
+---------------------------------------------------------------------------
+-- A shell that could not be lifted because its chunk was not loaded is
+-- remembered here and swept up the next time the world streams that spot in.
+-- Without this the old box simply stays in the world for good.
+local MAX_GHOSTS = 32
+
+-- How far around the player to look for shells nobody wrote down. Small: the
+-- box is a tile wide and impossible to miss, so this only has to cover ground
+-- the player is standing on, not search for it.
+local STRAY_RADIUS = 10
+
+--- Notes a position that still has a shell on it we mean to be rid of.
+function Core.forgetExterior(x, y, z)
+    local s = U.state()
+    for _, g in ipairs(s.ghosts) do
+        if g.x == x and g.y == y and g.z == z then return false end
+    end
+    table.insert(s.ghosts, { x = x, y = y, z = z })
+    -- Bounded on purpose: this list is written to the save, and a player who
+    -- flies a hundred times should not carry a hundred entries forever.
+    while #s.ghosts > MAX_GHOSTS do table.remove(s.ghosts, 1) end
+    U.log("old shell at %d,%d,%d is out of reach; will clear it when that " ..
+          "area loads", x, y, z)
+    return true
+end
+
+--- Clears any remembered shell whose chunk has since streamed in.
+---
+--- A loaded chunk settles the question either way: the shell is removed, or
+--- it was already gone. Either way the entry is done with.
+function Core.sweepGhosts()
+    local s = U.state()
+    if #s.ghosts == 0 then return 0 end
+
+    local cleared = 0
+    for i = #s.ghosts, 1, -1 do
+        local g = s.ghosts[i]
+        if U.chunkLoaded(g.x, g.y, g.z) then
+            local removed = Core.removeExteriorAt(g.x, g.y, g.z)
+            table.remove(s.ghosts, i)
+            if removed then
+                cleared = cleared + 1
+                U.log("cleared the old shell at %d,%d,%d", g.x, g.y, g.z)
+            end
+        end
+    end
+    return cleared
+end
+
+--- Catch-all: removes any shell standing near the player that is not the one
+--- the ship is recorded at.
+---
+--- The ghost list only knows about shells this build left behind. A world
+--- played on an earlier build has strays nobody wrote down, and this is the
+--- only thing that will ever find them. Deliberately slow and short-ranged --
+--- it is a tidy-up, not a search.
+function Core.sweepStrays(player)
+    local s = U.state()
+    if not player or not s.placed then return 0 end
+
+    local px, py = math.floor(player:getX()), math.floor(player:getY())
+    local pz = math.floor(player:getZ())
+    if U.isInterior(px, py) then return 0 end
+
+    local removed = 0
+    for dx = -STRAY_RADIUS, STRAY_RADIUS do
+        for dy = -STRAY_RADIUS, STRAY_RADIUS do
+            local x, y = px + dx, py + dy
+            if not (x == s.x and y == s.y and pz == s.z) then
+                -- Straight at the square rather than through
+                -- removeExteriorAt: the player is standing here, so the chunk
+                -- check that call makes would be 441 pointless trips to Java.
+                local sq = U.square(x, y, pz, false)
+                local obj = sq and Core.exteriorOn(sq)
+                if obj and U.try("removeStray", function()
+                    sq:removeWorldObject(obj)
+                    return true
+                end) then
+                    removed = removed + 1
+                    U.log("removed a stray shell at %d,%d,%d", x, y, pz)
+                end
+            end
+        end
+    end
+    return removed
 end
 
 ---------------------------------------------------------------------------
@@ -100,7 +198,14 @@ function Core.materialise(sq, player)
     local s = U.state()
 
     if s.placed then
-        Core.removeExteriorAt(s.x, s.y, s.z)
+        -- The old shell must go, and "I could not reach it" is not the same
+        -- as "it is gone". When its chunk is not loaded -- which is every
+        -- flight, since a landing site is nowhere near where the ship was --
+        -- write the position down and clear it when the world catches up.
+        local _, why = Core.removeExteriorAt(s.x, s.y, s.z)
+        if why == "unloaded" or why == "failed" then
+            Core.forgetExterior(s.x, s.y, s.z)
+        end
     end
     -- If the player is carrying one, that copy is the one being placed.
     Core.takeFromInventory(player)
@@ -489,6 +594,8 @@ Events.EveryTenMinutes.Add(Core.refillWater)
 
 local rescueTick = 0
 local fieldTick = 0
+local ghostTick = 0
+local strayTick = 0
 Events.OnPlayerUpdate.Add(function(player)
     rescueTick = rescueTick + 1
     if rescueTick >= 10 then
@@ -502,6 +609,39 @@ Events.OnPlayerUpdate.Add(function(player)
         fieldTick = 0
         Core.repelZombies()
     end
+
+    -- Sweeping up old shells. The ghost list is cheap and checked often, so a
+    -- box the ship flew away from goes the moment the player is near enough
+    -- for its chunk to load. The stray sweep walks squares, so it is rare.
+    ghostTick = ghostTick + 1
+    if ghostTick >= 30 then
+        ghostTick = 0
+        Core.sweepGhosts()
+    end
+    strayTick = strayTick + 1
+    if strayTick >= 300 then
+        strayTick = 0
+        Core.sweepStrays(player)
+    end
 end)
+
+--- Exposed for the debug console: TARDIS_Ghosts()
+---
+--- Lists shells the mod knows it has left behind and forces a sweep. An entry
+--- that stays in the list is one whose chunk has not streamed in yet, which is
+--- expected until somebody goes near it.
+function TARDIS_Ghosts()
+    local s = U.state()
+    U.log("ghosts: %d shell(s) pending removal", #s.ghosts)
+    for _, g in ipairs(s.ghosts) do
+        U.log("  %d,%d,%d  chunk loaded=%s", g.x, g.y, g.z,
+              tostring(U.chunkLoaded(g.x, g.y, g.z)))
+    end
+    local cleared = Core.sweepGhosts()
+    local strays = Core.sweepStrays(U.player(0))
+    U.log("ghosts: cleared %d, plus %d stray(s) near you; %d still pending",
+          cleared, strays, #s.ghosts)
+    return cleared + strays
+end
 
 return Core

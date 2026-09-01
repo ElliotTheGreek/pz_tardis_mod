@@ -79,8 +79,12 @@ end
 -- player came in from, which decks are built and the bookmark list.
 function U.state()
     local s = ModData.getOrCreate(C.StateKey)
-    if s.schema ~= 1 then
-        s.schema      = 1
+    -- Every field below falls back to what is already there, so raising the
+    -- schema re-runs this block without losing anything. Schema 2 added
+    -- `ghosts`: shells left standing somewhere whose chunk was not loaded at
+    -- the time, to be swept up when the world next streams that spot in.
+    if s.schema ~= 2 then
+        s.schema      = 2
         s.version     = C.Version
         s.placed      = s.placed == true
         s.x           = s.x or 0
@@ -93,7 +97,11 @@ function U.state()
         s.builtDecks  = s.builtDecks or {}
         s.bookmarks   = s.bookmarks or {}
         s.destination = s.destination or nil
+        s.ghosts      = s.ghosts or {}
     end
+    -- Belt and braces: a world saved by a build between the two schemas can
+    -- have schema 2 and no ghosts list, and every read of it assumes a table.
+    s.ghosts = s.ghosts or {}
     return s
 end
 
