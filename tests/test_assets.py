@@ -28,6 +28,36 @@ mod_icons = set(re.findall(r"^\s*Icon\s*=\s*([A-Za-z0-9_]+)\s*,", script, re.M))
 
 failures, checked_sprites, checked_items = [], 0, 0
 
+# Clothing items are resolved by GUID through media/fileGuidTable.xml. A
+# clothing XML with no entry there loads as nothing at all, silently: the item
+# exists, is worn, and shows no model. That cost a whole evening, so it is
+# checked here instead of in game.
+CLOTHING_DIR = os.path.join(MOD, "media", "clothing", "clothingItems")
+GUID_TABLE = os.path.join(MOD, "media", "fileGuidTable.xml")
+if os.path.isdir(CLOTHING_DIR):
+    table = open(GUID_TABLE, encoding="utf-8").read() if os.path.exists(GUID_TABLE) else ""
+    listed = dict(zip(re.findall(r"<path>([^<]+)</path>", table),
+                      re.findall(r"<guid>([^<]+)</guid>", table)))
+    for fn in sorted(os.listdir(CLOTHING_DIR)):
+        if not fn.endswith(".xml"):
+            continue
+        body = open(os.path.join(CLOTHING_DIR, fn), encoding="utf-8").read()
+        m = re.search(r"<m_GUID>([^<]+)</m_GUID>", body)
+        want = f"media/clothing/clothingItems/{fn}"
+        if not m:
+            failures.append(f"{fn} has no <m_GUID>")
+        elif want not in listed:
+            failures.append(f"{fn} is not listed in media/fileGuidTable.xml; "
+                            f"it will load as nothing")
+        elif listed[want] != m.group(1):
+            failures.append(f"{fn} guid {m.group(1)} does not match "
+                            f"fileGuidTable.xml entry {listed[want]}")
+        # and every model it names has to be on disk
+        for mdl in re.findall(r"<m_(?:Male|Female)Model>([^<]+)</m_", body):
+            rel = mdl.replace("\\", "/").replace("media/", "", 1)
+            if rel and not os.path.exists(os.path.join(MOD, "media", rel)):
+                failures.append(f"{fn} names model {mdl} which does not exist")
+
 # Every icon a mod item names has to exist as a file. A missing one shows as
 # a blank square in the inventory and reports nothing anywhere.
 for icon in sorted(mod_icons):

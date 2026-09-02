@@ -133,6 +133,40 @@ that calls `vehicle:getBattery()` on a `BaseVehicle`. That method does not
 exist. Dead or broken code in the game's own scripts is common enough that it
 cannot be used as evidence.
 
+### A zombie's appearance is fixed when it spawns
+
+Daleks were attempted and removed. The verdict is worth keeping, because the
+idea is an obvious one and the failure is invisible from every angle but one.
+
+**A zombie that already exists cannot be restyled.** A character's model is
+built from its `ItemVisuals`, and those are baked at spawn. Adding a worn item
+afterwards succeeds at every single step and never reaches them:
+
+```
+-- after AddItem + setWornItem + resetModel, on a live zombie:
+itemVisuals = [ Briefs, Vest, Socks, Shoes, Trousers ]     -- and nothing else
+```
+
+Nothing throws. The item exists, the clothing definition resolves, the body
+location is right, the mesh is on disk and correctly scaled. It simply is not
+in the list the renderer draws from, so it was never going to appear.
+
+**And a creature cannot be added.** Non-human models need a rigged skeleton and
+an animation set under `media/anims_X`; there are four and all four ship with
+the game.
+
+A zombie can be *given* something at creation -- that is what
+`AttachedWeaponDefinitions` is for, and it is Lua and mod-extensible -- but it
+cannot be turned into something else afterwards.
+
+If this comes up again, check `getItemVisuals():getDescription()` **first**. It
+is the only thing in the chain that tells "worn" apart from "drawn". Reaching
+for it early would have saved six rounds of fixing real bugs -- a wrongly
+driven world item, `setInvisible` that does not hide, an unregistered clothing
+GUID -- each of which was a genuine fault, and none of which put anything on
+screen. **Fixing a real bug is not the same as the feature working, and only
+the thing the renderer reads settles it.**
+
 ### Never build where no player is standing
 
 Chunks only stream around a player. `getOrCreateGridSquare` on an unloaded
@@ -325,6 +359,10 @@ jump.
 chunk was not loaded — every flight left a police box behind. Worlds played
 before the fix have strays nothing wrote down; `Core.sweepStrays` removes them
 when a player walks within ten tiles, and `TARDIS_Ghosts()` forces it.
+
+Daleks were attempted and removed -- see *A zombie's appearance is fixed when
+it spawns*. `tools/gen_dalek.py` is kept: the model itself was good and
+previews correctly, so it would serve as a static prop if one is ever wanted.
 
 Confirmed by static checks but **not yet seen in game at the time of writing**:
 the octagonal room shape, the redressed console room, the armoury, the galley

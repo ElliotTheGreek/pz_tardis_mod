@@ -166,10 +166,13 @@ class MeshBuilder:
                       bottom_region, P(0, 0, -1))
 
     # -- output ---------------------------------------------------------
-    def emit(self, path, mesh_name, texture_file):
+    def emit(self, path, mesh_name, texture_file, frame_name="Root"):
+        """frame_name matters for character models: the vanilla static clothes
+        name their Frame and Mesh after the file, and the clothing loader is
+        not the same loader world models go through."""
         import math
         n_v, n_f = len(self.verts), len(self.faces)
-        out = ["xof 0303txt 0032", "", TEMPLATES, "Frame Root {",
+        out = ["xof 0303txt 0032", "", TEMPLATES, f"Frame {frame_name} {{",
                " FrameTransformMatrix {",
                "  1.000000,0.000000,0.000000,0.000000,",
                "  0.000000,1.000000,0.000000,0.000000,",
