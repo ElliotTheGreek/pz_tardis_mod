@@ -38,6 +38,11 @@ module TARDIS
         Tooltip = Tooltip_TARDIS_PoliceBox,
     }
 
+    /*  The old plain console. Kept declared, and no longer placed: a world
+        item saved by one class and reloaded as another reads a section that
+        was never written, so an existing world keeps resolving this id until
+        TARDIS_Build lifts it out and puts the container console down in its
+        place.  */
     item TARDISConsole
     {
         ItemType = base:normal,
@@ -48,6 +53,37 @@ module TARDIS
         Weight = 80.0,
         WorldStaticModel = TARDISConsoleModel,
         StaticModel = TARDISConsoleModel,
+    }
+
+    /*  The console is also the ship's hold.
+
+        A container item rather than a plain one: ISInventoryPage walks the
+        world objects on the squares around the player and gives its own
+        button to every item whose category is Container, so the model in the
+        middle of the control room opens like a crate without needing a
+        tile sprite behind it.
+
+        Capacity is in weight units, and 50 is not a choice -- it is the
+        ceiling. ItemContainer.getCapacity() returns min(capacity, 50) for a
+        container that belongs to an item, and InventoryContainer.getCapacity()
+        then clamps that again to 50 minus the item's own weight. Declaring
+        500 gets you 50; declaring 500 on an item weighing 80 gets you -30,
+        which is a hold you can take out of and never put into.
+
+        Hence Weight 1.0, for 49 usable. The rest of the hold is the ring of
+        crates around the console (C.ConsoleHold), where the ceiling is 100
+        a crate instead.  */
+    item TARDISConsoleUnit
+    {
+        ItemType = base:container,
+        DisplayName = TARDIS Console,
+        DisplayCategory = Furniture,
+        Icon = TARDIS_PoliceBox,
+        Weight = 1.0,
+        Capacity = 50,
+        WorldStaticModel = TARDISConsoleModel,
+        StaticModel = TARDISConsoleModel,
+        Tooltip = Tooltip_TARDIS_Console,
     }
 
     item TARDISSonicScrewdriver

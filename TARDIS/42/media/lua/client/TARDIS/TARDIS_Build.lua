@@ -102,6 +102,109 @@ local function clearSurroundings(deck)
     U.debug("cleared %d objects from the margin around %s", cleared, deck.id)
 end
 
+--- Sprites the mod used to place and no longer should. A rebuild preserves
+--- anything the mod tagged -- that is the whole point of the tag -- so a
+--- sprite that turns out to be the wrong one has to be named and taken out,
+--- or it stands there for the life of the world.
+---
+--- The counter basins were placed on bare floor, where they hang over the
+--- square behind and read as a sink set into the floor. `furnish` puts one
+--- back on the counter square in the galley, which is where that sprite
+--- belongs; everywhere else gets a pedestal sink instead.
+local LEGACY_SPRITES = {
+    ["fixtures_sinks_01_0"] = true, ["fixtures_sinks_01_1"] = true,
+    ["fixtures_sinks_01_2"] = true, ["fixtures_sinks_01_3"] = true,
+}
+
+local function stripLegacy(deck)
+    local removed = 0
+    local look = U.batch("stripLegacy")
+    for ox = 0, C.RoomSize do
+        for oy = 0, C.RoomSize do
+            local x, y = at(deck, ox, oy)
+            local sq = U.square(x, y, deck.z, false)
+            if sq then
+                local doomed = {}
+                look(function()
+                    U.eachObject(sq, function(o)
+                        local spr = o:getSprite()
+                        local name = spr and spr:getName()
+                        if name and LEGACY_SPRITES[name] then
+                            table.insert(doomed, o)
+                        end
+                    end)
+                    return true
+                end)
+                for _, o in ipairs(doomed) do
+                    if U.try("stripLegacy.remove", function()
+                        sq:RemoveTileObjectErosionNoRecalc(o)
+                        return true
+                    end) then removed = removed + 1 end
+                end
+            end
+        end
+    end
+    if removed > 0 then
+        U.log("%s: removed %d object(s) placed with a sprite the mod no longer uses",
+              deck.id, removed)
+    end
+end
+
+--- The console room's galley corner, cleared for a new layout.
+---
+--- It used to run across two rows -- the sink on a counter *behind* the oven,
+--- and a second rank of counters in front of the appliances that hid the
+--- fridges and boxed the whole thing in. Revision 15 lays it as one run with
+--- the aisle in front kept clear, and the old furniture has to come out for
+--- that: a rebuild keeps everything the mod tagged, which is exactly what
+--- makes moving geometry a migration rather than a rebuild.
+---
+--- One-time, flagged in state, and it takes the contents of those containers
+--- with it. Only the kitchen's own tags, so the lamppost in the corner and the
+--- wall shelves either side of it stay where they are.
+local GALLEY_TAGS = {
+    counter = true, pantry = true, sink = true,
+    oven = true, microwave = true, fridge = true,
+}
+
+local function relayGalley(deck)
+    local s = U.state()
+    if s.galleyRelaid then return end
+
+    local removed = 0
+    local look = U.batch("relayGalley")
+    for ox = 3, 11 do
+        for oy = 17, 22 do
+            local x, y = at(deck, ox, oy)
+            local sq = U.square(x, y, deck.z, false)
+            if sq then
+                local doomed = {}
+                look(function()
+                    U.eachObject(sq, function(o)
+                        local md = o:getModData()
+                        if md and GALLEY_TAGS[md.TARDIS] then
+                            table.insert(doomed, o)
+                        end
+                    end)
+                    return true
+                end)
+                for _, o in ipairs(doomed) do
+                    if U.try("relayGalley.remove", function()
+                        sq:RemoveTileObjectErosionNoRecalc(o)
+                        return true
+                    end) then removed = removed + 1 end
+                end
+            end
+        end
+    end
+
+    s.galleyRelaid = true
+    if removed > 0 then
+        U.log("console galley: cleared %d object(s) of the old two-row layout",
+              removed)
+    end
+end
+
 --- Earlier revisions stacked every deck on one footprint. Those levels are
 --- still sitting under the console room in any world built that way, so they
 --- are cleared out once, the first time the new layout is raised.
@@ -323,29 +426,54 @@ end
 ---------------------------------------------------------------------------
 -- The armoury
 ---------------------------------------------------------------------------
--- Five crates, deliberately packed rather than seeded: every firearm the
--- build ships, every magazine, every calibre in every packaging, and the
--- optics to go on them. A military crate holds fifty, so each is filled.
--- Ammunition gets two crates rather than one. A container has a capacity,
--- and once it is full the engine drops further items silently -- which is how
--- a crate meant to hold every calibre ended up short of 5.56 and .45. Fewer
--- copies spread over more crates keeps every type present.
+-- Crates deliberately packed rather than seeded: every firearm the build
+-- ships, every magazine, every calibre in every packaging, the optics to go
+-- on them, and holsters.
+--
+-- Capacity does not stop the stocking -- ItemContainer.AddItem never checks
+-- it -- but a crate stocked past its capacity is one the player can only ever
+-- take out of. So `copies` is chosen against the weight of each list and the
+-- 50 a military crate holds; the per-copy weights are in the comments beside
+-- each list in TARDIS_Config, and nothing here asks for more than about 48.
+
+--- The crates every armoury gets, in the order the spots are listed.
 local ARMOURY = {
-    { loot = C.Loot.firearms,    copies = 2, tag = "armoury.guns" },
-    { loot = C.Loot.gunMags,     copies = 4, tag = "armoury.mags" },
-    { loot = C.Loot.gunAmmo,     copies = 1, tag = "armoury.ammo" },
-    { loot = C.Loot.gunAmmo,     copies = 1, tag = "armoury.ammo" },
-    { loot = C.Loot.attachments, copies = 3, tag = "armoury.optics" },
+    { loot = C.Loot.sidearms,    copies = 3, tag = "armoury.guns" },   -- 35.1
+    { loot = C.Loot.longarms,    copies = 1, tag = "armoury.rifles" }, -- 42.0
+    { loot = C.Loot.gunMags,     copies = 6, tag = "armoury.mags" },   --  7.2
+    { loot = C.Loot.pistolAmmo,  copies = 6, tag = "armoury.ammo" },   -- 29.5
+    { loot = C.Loot.attachments, copies = 4, tag = "armoury.optics" }, -- 11.2
+    { loot = C.Loot.holsters,    copies = 4, tag = "armoury.holsters" }, -- 8.8
 }
+
+--- The stores deck carries the bulk on top of that: the cartons, and 5.56 by
+--- the crate. Two crates of it, because it is what the M16 eats and it is the
+--- calibre this ship is always short of.
+local ARMOURY_STORES = {}
+for _, spec in ipairs(ARMOURY) do table.insert(ARMOURY_STORES, spec) end
+table.insert(ARMOURY_STORES,
+    { loot = C.Loot.pistolCartons, copies = 1, tag = "armoury.cartons" })  -- 48.0
+table.insert(ARMOURY_STORES,
+    { loot = C.Loot.rifleCartons,  copies = 1, tag = "armoury.cartons" })  -- 32.0
+table.insert(ARMOURY_STORES,
+    { loot = C.Loot.ammo556,       copies = 8, tag = "armoury.556" })      -- 45.9
+table.insert(ARMOURY_STORES,
+    { loot = C.Loot.ammo556,       copies = 8, tag = "armoury.556" })      -- 45.9
+-- A crate of katanas of its own, as well as the few laid in with the
+-- sidearms. A crate that already exists is never restocked, so a list that
+-- only appears inside an old crate never reaches a world already in play;
+-- this one is a new crate on a new square, so it lands either way.
+table.insert(ARMOURY_STORES,
+    { loot = C.Loot.katanas,       copies = 4, tag = "armoury.blades" })   --  8.0
 
 --- Places the armoury crates at the given offsets. Returns how many landed.
 ---
 --- Uses U.stockEach, which puts one of everything in and then reads the
 --- container back, so a calibre the engine refused is reported rather than
 --- quietly absent.
-local function armouryBay(deck, spots)
+local function armouryBay(deck, spots, specs)
     local placed = 0
-    for i, spec in ipairs(ARMOURY) do
+    for i, spec in ipairs(specs or ARMOURY) do
         local spot = spots[i]
         if spot and inShape(deck, spot[1], spot[2])
            and not C.isLanding(spot[1], spot[2]) then
@@ -369,6 +497,105 @@ local function armouryBay(deck, spots)
 end
 
 ---------------------------------------------------------------------------
+-- The hold
+---------------------------------------------------------------------------
+--- The ring of crates around the console, which is where the hold actually
+--- lives: the console item is capped at 49 by the engine and a crate at 100.
+---
+--- Capacity and name are set on every pass rather than only on the one that
+--- creates the crate. Both are fields of the container rather than of the
+--- sprite, and re-applying them costs two calls per crate.
+local function holdRing(deck)
+    local crates = {}
+    for _, spot in ipairs(C.ConsoleHold.spots) do
+        if inShape(deck, spot[1], spot[2]) and not C.isLanding(spot[1], spot[2]) then
+            local x, y = at(deck, spot[1], spot[2])
+            local obj = U.addContainer(U.square(x, y, deck.z, true),
+                                       C.Sprites.crate, "hold")
+            local c = obj and U.containerOf(obj)
+            if c then
+                U.try("hold.setCapacity", function()
+                    c:setCapacity(C.ConsoleHold.capacity)
+                end)
+                U.try("hold.setCustomName", function()
+                    c:setCustomName(C.ConsoleHold.name)
+                end)
+                table.insert(crates, c)
+            end
+        end
+    end
+    return crates
+end
+
+--- Moves the heavy end of the console's contents out into the ring.
+---
+--- The kit is 395 weight and the console holds 49, so nearly all of it has to
+--- live in the crates. Heaviest first, which leaves the console holding what
+--- you would actually want to grab on the way out -- screwdrivers, pills,
+--- bandages, a pistol -- and puts the cartons and the tins in the ring.
+---
+--- Runs on every build, not only the one that stocks the kit: a world that
+--- already had everything piled into the console (AddItems does not check
+--- capacity, so it all went in) is put right the next time the deck is built.
+local function spillHold(hold, crates)
+    if not hold or #crates == 0 then return 0 end
+
+    local cap  = U.try("hold.capacity", function() return hold:getCapacity() end) or 0
+    local have = U.try("hold.weight", function() return hold:getCapacityWeight() end) or 0
+    if cap <= 0 or have <= cap then return 0 end
+
+    -- How much each crate will take, tallied here rather than re-read per
+    -- item: this loop is one of the longest in the mod.
+    local room = {}
+    for i, c in ipairs(crates) do
+        local ccap = U.try("crate.capacity", function() return c:getCapacity() end) or 0
+        local cwt  = U.try("crate.weight", function() return c:getCapacityWeight() end) or 0
+        room[i] = ccap - cwt
+    end
+
+    -- Read the contents into a Lua list before moving any of them. Walking
+    -- the Java list while taking things out of it skips every other item.
+    local entries = {}
+    U.try("hold.items", function()
+        local items = hold:getItems()
+        if not items then return end
+        for i = 0, items:size() - 1 do
+            local it = items:get(i)
+            if it then
+                local w = U.try("item.weight", function() return it:getWeight() end) or 0
+                table.insert(entries, { item = it, w = w })
+            end
+        end
+    end)
+    table.sort(entries, function(a, b) return a.w > b.w end)
+
+    local moved, ci = 0, 1
+    local shift = U.batch("hold.spill")
+    for _, e in ipairs(entries) do
+        if have <= cap then break end
+        while ci <= #crates and room[ci] < e.w do ci = ci + 1 end
+        if ci > #crates then break end
+        -- The game's own transfer takes the item out of the source first and
+        -- adds it to the destination second; follow it.
+        local ok = shift(function()
+            hold:DoRemoveItem(e.item)
+            crates[ci]:AddItem(e.item)
+            return true
+        end)
+        if not ok then break end
+        room[ci] = room[ci] - e.w
+        have = have - e.w
+        moved = moved + 1
+    end
+
+    if moved > 0 then
+        U.log("console hold: moved %d item(s) into the ring, %d of %d aboard",
+              moved, math.floor(have), cap)
+    end
+    return moved
+end
+
+---------------------------------------------------------------------------
 -- Deck dressing
 ---------------------------------------------------------------------------
 local furnish = {}
@@ -387,26 +614,68 @@ local furnish = {}
 furnish.console = function(deck)
     local S = C.Sprites
 
-    -- the console itself, centred, on a rug
+    -- The console itself, centred, on a rug -- and, since revision 11, the
+    -- ship's hold as well: the item is a container, so the model opens like a
+    -- crate and carries C.ConsoleKit.
+    --
+    -- A world built before that has the old plain console standing here. It
+    -- is lifted out and this one put down in its place; a plain item cannot
+    -- grow an inventory, and reusing the id would have meant loading a save
+    -- as a class that never wrote it.
     local cx, cy = 12, 12
+    local hold                                  -- the console's own container
     local x, y = at(deck, cx, cy)
     local sq = U.square(x, y, deck.z, true)
     if sq then
-        local already = false
+        local console, legacy = nil, {}
         U.try("scanConsole", function()
             local items = sq:getWorldObjects()
             if items then
                 for i = 0, items:size() - 1 do
                     local it = items:get(i)
                     local item = it and it:getItem()
-                    if item and item:getFullType() == C.ConsoleItem then already = true end
+                    local id = item and item:getFullType()
+                    if id == C.ConsoleItem then
+                        console = item
+                    elseif id == C.LegacyConsoleItem then
+                        table.insert(legacy, it)
+                    end
                 end
             end
         end)
-        if not already then
-            U.try("addConsole", function()
-                sq:AddWorldInventoryItem(C.ConsoleItem, 0.5, 0.5, 0.0)
+
+        local drop = U.batch("removeWorldObject")
+        for _, old in ipairs(legacy) do
+            drop(function() sq:removeWorldObject(old) end)
+        end
+        if #legacy > 0 then
+            U.log("replaced %d legacy console item(s) with the hold", #legacy)
+        end
+
+        local fresh = false
+        if not console then
+            console = U.try("addConsole", function()
+                return sq:AddWorldInventoryItem(C.ConsoleItem, 0.5, 0.5, 0.0)
             end)
+            fresh = console ~= nil
+        end
+
+        hold = console and U.try("consoleInventory", function()
+            return console:getInventory()
+        end)
+        if console and not hold then
+            U.warnOnce("consoleHold",
+                       "the console item carries no container")
+        end
+
+        -- Stocked on the pass that puts the console down and never again.
+        -- The hold is a container like any other: what gets taken out of it
+        -- stays taken, and a rebuild finds the console already standing.
+        if fresh and hold then
+            local _, short = U.stockKit(hold, C.ConsoleKit)
+            if #short > 0 then
+                U.log("console hold short of: %s", table.concat(short, ", "))
+            end
         end
     end
 
@@ -419,6 +688,10 @@ furnish.console = function(deck)
             end
         end
     end
+
+    -- The rest of the hold: crates on the rug around the console, and the
+    -- heavy end of what is aboard moved out into them.
+    spillHold(hold, holdRing(deck))
 
     -- The case of sonic screwdrivers, stood beside the console where anyone
     -- walking up from the landing will see it. Stocked with U.stockEach
@@ -509,31 +782,48 @@ furnish.console = function(deck)
     -- The armoury, on the deck you actually arrive on, along the east wall
     -- where there is room for a rank of crates.
     armouryBay(deck, { { 16, 14 }, { 18, 14 }, { 20, 14 },
-                       { 16, 16 }, { 18, 16 } })
+                       { 16, 16 }, { 18, 16 }, { 20, 16 } })
 
     -- A galley corner in the south-west, so the deck you live on can feed
     -- you without a trip down to the galley proper.
     local function fit(ox, oy, sprite, tag, loot, amount)
-        if not inShape(deck, ox, oy) or C.isLanding(ox, oy) then return end
+        if not inShape(deck, ox, oy) or C.isLanding(ox, oy) then return nil end
         local fx, fy = at(deck, ox, oy)
         local sq = U.square(fx, fy, deck.z, true)
         if not loot then
-            U.addObject(sq, sprite, tag)
-            return
+            return (U.addObject(sq, sprite, tag))
         end
         local obj, made = U.addContainer(sq, sprite, tag)
         if obj and (made or C.DevRestock) then U.stock(obj, loot, amount) end
+        return obj
     end
 
-    fit(4, 18, S.sink.W, "sink")
-    fit(4, 19, S.counter.N, "counter", C.Loot.cookware, 6)
-    fit(5, 20, S.oven.N, "oven")
-    fit(6, 20, S.microwave.N, "microwave", C.Loot.food, 3)
-    fit(7, 20, S.counter.N, "counter", C.Loot.cookware, 6)
-    fit(8, 20, S.fridge.N, "fridge", C.Loot.food, 12)
+    relayGalley(deck)
+
+    -- One straight run along row 20, all of it facing into the room: wet end,
+    -- cooking, then cold. The sink and the microwave are counter-top art, so
+    -- each gets a counter under it -- that is what makes a basin read as a
+    -- kitchen sink rather than a bath left on the floor.
+    --
+    -- Nothing goes on row 21. An appliance run with a second row of counters
+    -- in front of it is a wall: the fridges end up behind it, half drawn and
+    -- awkward to reach. The pantry faces the run across that aisle instead.
+    fit(5, 20, S.counter.N, "counter")
+    local sinkRun = fit(5, 20, S.sinkBasin.N, "sink")
+    local oven    = fit(6, 20, S.oven.N, "oven")
+    fit(7, 20, S.counter.N, "counter")
+    fit(7, 20, S.microwave.N, "microwave", C.Loot.food, 3)
+    fit(8, 20, S.counter.N, "counter", C.Loot.cookware, 6)
     fit(9, 20, S.fridge.N, "fridge", C.Loot.food, 12)
-    line(deck, S.counter.N, 4, 21, 1, 0, 6,
+    fit(10, 20, S.fridge.N, "fridge", C.Loot.food, 12)
+    line(deck, S.counter.N, 6, 22, 1, 0, 5,
          { loot = C.Loot.food, amount = 10, tag = "pantry" })
+
+    -- Said out loud because a sprite that does not land leaves an empty
+    -- square and no error anywhere, and this corner is the one thing on the
+    -- deck that gets looked for by name.
+    U.log("console galley: sink %s, oven %s",
+          sinkRun and "ok" or "MISSING", oven and "ok" or "MISSING")
 
     -- general stores along the south-east
     line(deck, S.locker.N, 16, 20, 1, 0, 3,
@@ -617,8 +907,15 @@ furnish.storage = function(deck)
     line(deck, S.locker.S, 16, 4, 0, 2, 6,
          { loot = C.Loot.medical, amount = 8, tag = "locker" })
 
-    -- a second armoury down here, where the bulk stores live
-    armouryBay(deck, { { 5, 23 }, { 8, 23 }, { 11, 23 }, { 14, 23 }, { 17, 23 } })
+    -- The full armoury down here, where the bulk stores live: the six crates
+    -- every bay gets along the south wall, and the heavy four -- the cartons
+    -- and the two crates of 5.56 -- in the row behind them, each reachable
+    -- from the gap between the crates in front.
+    armouryBay(deck, { { 5, 23 }, { 8, 23 }, { 11, 23 },
+                       { 14, 23 }, { 17, 23 }, { 20, 23 },
+                       { 6, 24 }, { 9, 24 }, { 12, 24 }, { 15, 24 },
+                       { 18, 24 } },
+               ARMOURY_STORES)
 
     -- gun racks on the wall behind the crates
     line(deck, S.metalShelf.N, 6, 21, 2, 0, 6,
@@ -802,6 +1099,9 @@ function B.buildDeck(index)
         { "buildWalls",     function() buildWalls(deck) end },
         { "powerDeck",      function() powerDeck(deck) end },
         { "lightDeck",      function() lightDeck(deck) end },
+        -- Before furnishing, not after: furnish puts the basin back on the
+        -- counter square where it belongs.
+        { "stripLegacy",    function() stripLegacy(deck) end },
         { "furnish",        function()
                                 U.resetStockCursors()
                                 local dress = furnish[deck.id]

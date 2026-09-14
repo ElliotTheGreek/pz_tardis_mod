@@ -190,6 +190,35 @@ squares cannot have it — `setRoom` silently does nothing. Decks step sideways
 (`col`) as they descend for exactly this reason. `deck.*.nothingOverhead` in
 the self-test guards it.
 
+### A table-top sprite is drawn as though it were on a counter
+
+Counter basins, lamps, radios and microwaves carry `IsTableTop`,
+`IsSurfaceOffset` and `Surface = 34`. The art is drawn already raised to
+counter height, so on bare floor it floats over the square behind and reads as
+though it were sunk into *that* square's floor.
+
+`U.addObject` sets `renderYOffset = Surface − whatever it stands on`: 0 on a
+counter, +34 on bare floor. **Not** `under − Surface`, which is what the game's
+own `placeMoveableInternal` computes — that was shipped in 1.9.1 and the sinks
+vanished, because it moves a floor-placed one further up. That path in the
+game's Lua is never exercised (a player puts a basin on a counter), and it is
+wrong.
+
+**How this was settled, when three rounds of reasoning had not been:** the
+sprites were extracted from `media/texturepacks/Tiles2x.pack` and composited
+over a floor tile. `PZPK`, an int version, an int page count, then per page a
+name, an entry count, a flag, `count` × (name, x, y, w, h, ox, oy, ow, oh),
+an int length and a PNG. Every entry is a 128×256 canvas and the floor diamond
+occupies rows 192–255, so where a sprite's art sits relative to that says
+immediately whether it stands on the ground. A sink basin is rows 142–180 —
+above the floor entirely. Look at the pixels.
+
+**The lesson generalises**: `IsoObject.new` + `AddTileObject` is not the whole
+of what the game does to put an object down. `ISMoveableSpriteProps:placeMoveableInternal`
+is the reference, and it also does `AddSpecialObject` with a computed insert
+index, `fixTableTopOverlays`, `RecalcProperties` and `RecalcAllWithNeighbours`.
+Read it before assuming a placement is complete.
+
 ### Tag every object you place
 
 `U.clearSquare` keeps tagged objects and destroys untagged ones, so an
@@ -244,8 +273,9 @@ Learn these; they map to causes that are not obvious from the symptom.
 | **Black screen, character falling, game unresponsive** | An exception thrown inside a per-tick or per-square loop, flooding the log. Look for repeated stack traces in `console.txt`. Has happened three times. |
 | **Player falls on entering** | The deck never finished building. Check for `arrival tick N: chunk ... loaded=false` and whether `deck N ... ready` ever appears. |
 | **A shelf is empty and nothing is logged** | A sprite name that does not exist. Silent by design in PZ. `tests/test_assets.py` catches these. |
-| **A container is missing item types** | Container capacity. `AddItems` drops items silently once full. Use `U.stockEach`, which reads the container back and reports what did not land. |
+| **A container is missing item types** | An id that does not resolve. `ItemContainer.AddItem` looks the id up in the script manager and returns null for one that is missing or `obsolete`, logging a line and nothing else. It does **not** check capacity — that was believed for a long time and is wrong; an over-filled container holds everything and simply refuses what a *player* tries to add. Use `U.stockEach`, which reads the container back and reports what did not land. |
 | **Furniture looks mismatched or doubled** | Multi-tile offsets wrong (`SpriteGridPos`), or two placement passes hitting one square. `tests/test_layout.py` checks the first. |
+| **A placed object sits in the floor, or floats** | A table-top sprite with no render offset. See *A table-top sprite is drawn as though it were on a counter*. |
 | **Interior looks like a tower in a forest** | The margin clearing did not run or the chunks streamed in late. It re-runs on every rebuild. |
 | **Half a feature works and the other half is silent** | A wrong engine call on the silent path. One `[TARDIS] WARN` line names it, and the Java stack traces under it give the file and line. `grep -E "\[TARDIS\] WARN" console.txt` first, always — it is one line and it is the answer. |
 | **Two of something that should be unique** | Something was removed at a position whose chunk was not loaded, and the failure was read as success. `TARDIS_Ghosts()` lists shells known to be pending and forces a sweep. |
@@ -262,6 +292,7 @@ Learn these; they map to causes that are not obvious from the symptom.
 | `tests/test_assets.py` | sprite names and item ids that do not exist in this build |
 | `tests/test_stock.py` | loot that does not spread across its list |
 | `tests/test_layout.py` | floor plan errors; multi-tile offsets vs `SpriteGridPos` |
+| `tools/tileview.py` | what a sprite actually *looks* like, without the game |
 
 `test_assets.py` also checks the mod's *own* items: every `TARDIS.*` id in the
 Lua must be declared in `media/scripts/tardis.txt`, and every `Icon =` in that
@@ -314,8 +345,8 @@ gets verified. Practical notes:
   contents. Say so *before* they load in, not after.
 - **They will spot real bugs from symptoms.** "The beds are weird and
   mismatched" was a genuine `SpriteGridPos` inversion; "only two rounds found"
-  was container capacity silently dropping items. Investigate the report,
-  do not explain it away.
+  was an armoury crate stocked with ids that did not resolve. Investigate the
+  report, do not explain it away.
 - Decks rebuild **lazily on arrival**, so a change to deck 4 shows nothing
   until they walk into deck 4. Worth saying every time.
 
@@ -333,6 +364,21 @@ python tools/gen_sonic.py   TARDIS/42     # sonic screwdriver icon
 python tools/preview_model.py <mesh> <texture> out.png
 ```
 
+Tile sprites are not generated -- they come from the build -- but they can be
+looked at the same way, which is worth doing before believing a placement is
+correct:
+
+```sh
+python tools/tileview.py --where fixtures_sinks_01_0     # is it on the floor?
+python tools/tileview.py --stack carpentry_02_17 fixtures_sinks_01_0
+```
+
+`tileview.py` reads `media/texturepacks/Tiles2x.pack` directly, composites a
+sprite over a floor tile and writes a PNG. `--where` prints where the art sits
+on the 128x256 canvas against the floor diamond at rows 192-255, which is the
+fastest way to tell a fixture that stands on the ground from one that expects a
+counter under it.
+
 `preview_model.py` is a small software renderer — parser, z-buffer, per-pixel
 texture sampling — so a model can be checked without launching the game. It
 verified the police box before the game was ever involved.
@@ -345,7 +391,7 @@ its side), and **1 unit is 1 tile**, with `scale` set in
 
 ## Current state
 
-Version **1.8.1**, build revision **10**.
+Version **1.9.3**, build revision **15**.
 
 Working and confirmed in game: summoning, enter/exit, all six decks
 generating, container stocking, water, crops, travel by map, bookmarks, the
@@ -374,6 +420,68 @@ debug console reports what a sweep found and what it did to it.
 Revision 10 adds the sonic case to the console room, so **an existing world
 rebuilds the console deck the next time the player stands on it.** That
 preserves everything already in the room; it does not restock it.
+
+Revision 11 (1.9.0) makes the console itself the ship's hold — a container
+item with 500 capacity, stocked once from `C.ConsoleKit` — reworks the armoury
+around container capacity, and puts a sink beside the oven in the console
+room's galley corner. Confirmed by static checks, **none of it seen in game
+yet**. Three things to watch for on the first load:
+
+- `TARDIS-TEST console.hold` and `console.stocked`. The hold is the one part
+  that could fail silently in a new way: if the container item does not
+  resolve, the console still stands there and simply never opens.
+- `[TARDIS] console hold short of: ...` — the kit weighs 395 of 500, so this
+  should not appear.
+- `[TARDIS] replaced N legacy console item(s) with the hold`, once, in a world
+  that predates the change.
+
+Revision 12 is what the first pass in game turned up. The console read
+**380 / -30**: `Capacity = 500` on the item was never going to work, because
+`ItemContainer.getCapacity()` returns `min(capacity, 50)` for a container that
+belongs to an item and `InventoryContainer.getCapacity()` clamps that again to
+`50 - the item's own weight`. A world object's container is capped at 100. So
+the console item now weighs 1 and holds 49, and the hold proper is a ring of
+six crates around it at 100 apiece, with `spillHold` moving the heavy end of
+the kit out into them on every build.
+
+**And `AddItem` does not check capacity at all** — disassembled to be sure. It
+resolves the id, creates the item and adds it; it returns null only for an id
+the script manager does not know or one marked `obsolete`. Everything this mod
+stocks goes in, however far over the capacity it is. What an over-filled
+container costs is the *player*, who cannot put anything back until it is
+under. The old note in the failure table said otherwise and was wrong.
+
+Revision 15 relays the console room's galley corner. It ran across two rows --
+the sink on a counter behind the oven, a second rank of counters in front of
+the appliances hiding the fridges -- and is now one run along row 20 with the
+aisle in front of it kept clear and the pantry facing it across that aisle.
+`relayGalley` is the migration that makes it possible: a rebuild keeps
+everything the mod tagged, so the old furniture had to be named and taken out,
+one time, contents and all.
+
+Revision 14 is the table-top render offset, above, with the sign the rendered
+sprites prove rather than the one the game's Lua computes. It also swaps the
+wet-block and console sinks from the counter basin to a pedestal sink, puts a
+counter under the galley basin and the microwave, and strips the old
+free-standing basins (`stripLegacy`) — a rebuild preserves anything the mod
+tagged, so a sprite that turns out to be the wrong one has to be named and
+taken out or it stands there forever.
+
+Revision 13 shipped the offset with the wrong sign and made the sinks
+disappear. Rev 12 before it logged `console galley:` and proved the objects
+were being placed all along, which is what narrowed this to rendering.
+
+Rev 12 also carries a `[TARDIS] console galley:` line naming
+whether each sink and the oven landed, and `TARDIS-TEST galley.*` checks that
+read the squares back — the console room's second sink was reported missing in
+game and the placement itself gives no evidence either way.
+
+The rework of the armoury lists is a usability fix as much as a feature: the
+old crates were stocked with more than they can hold — `firearms` at two copies
+is 103 in a container that holds 50 — and while everything did go in (`AddItem`
+never checks capacity), a crate that far over is one the player can only ever
+take out of. Existing crates keep what they were given; only new ones get the
+new lists.
 
 Known limits are listed at the bottom of `README.md`.
 

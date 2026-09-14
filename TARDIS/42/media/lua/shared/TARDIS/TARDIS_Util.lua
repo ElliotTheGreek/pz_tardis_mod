@@ -240,10 +240,69 @@ end
 
 --- Adds an IsoObject with the given sprite unless one is already there.
 --- Returns the object (existing or new) and whether it was created now.
+--- Drops a table-top sprite onto whatever it is actually standing on.
+---
+--- A lamp, radio, microwave or counter basin is a **table-top** sprite: its
+--- art is drawn already raised to counter height, so it lines up when it is
+--- put on a counter and floats when it is not. Extracted from the texture
+--- pack, `fixtures_sinks_01_0` is 35x20 of art sitting entirely *above* the
+--- floor diamond -- it is a basin, not a sink unit -- and a lamp and a
+--- microwave are the same. Left at an offset of zero on bare floor, each one
+--- hangs over the square behind it and reads as though it were sunk into that
+--- square's floor.
+---
+--- The correction is the sprite's own `Surface`, less whatever it is standing
+--- on: `Surface` on bare floor, zero on a counter of the same height.
+---
+--- **The sign is the opposite of the game's own placement code.**
+--- `ISMoveableSpriteProps:placeMoveableInternal` computes
+--- `under - Surface` and hands that to `setRenderYOffset`, which is right for
+--- a counter (0) and moves a floor-placed one further *up*. Rendering the
+--- sprites out of `Tiles2x.pack` against a floor tile settles it: down is
+--- what grounds them, and down is positive. The game's floor-placement path
+--- for a table-top item is code nothing exercises -- a player puts a basin on
+--- a counter -- and it is wrong. Pixels over source.
+---
+--- Batched, not `U.try`: this runs on every object on every deck.
+local seat = U.batch("seatOnSurface")
+local function seatOnSurface(obj, sq)
+    if not obj then return end
+    seat(function()
+        local sprite = obj:getSprite()
+        local props = sprite and sprite:getProperties()
+        if not props then return end
+        if not (props:isTableTop() and props:isSurfaceOffset()) then return end
+
+        -- The height of anything already on the square that this could be
+        -- standing on, so a basin put down on a counter is left alone.
+        local under = 0
+        if sq then
+            local objects = sq:getObjects()
+            if objects then
+                for i = 0, objects:size() - 1 do
+                    local other = objects:get(i)
+                    local op = other ~= obj and other:getSprite()
+                                            and other:getSprite():getProperties()
+                    if op and op:isTable() then
+                        local s = op:getSurface()
+                        if s > under then under = s end
+                    end
+                end
+            end
+        end
+        obj:setRenderYOffset(props:getSurface() - under)
+    end)
+end
+
 function U.addObject(sq, sprite, tag)
     if not sq or not sprite then return nil, false end
     local existing = U.findSprite(sq, sprite)
-    if existing then return existing, false end
+    -- Seated on the way past as well, so a rebuild repairs everything placed
+    -- before this was understood.
+    if existing then
+        seatOnSurface(existing, sq)
+        return existing, false
+    end
 
     local obj = U.try("IsoObject.new", function()
         return IsoObject.new(sq, sprite, tag or "")
@@ -251,6 +310,7 @@ function U.addObject(sq, sprite, tag)
     if not obj then return nil, false end
 
     U.try("AddTileObject", function() sq:AddTileObject(obj) end)
+    seatOnSurface(obj, sq)
     if tag then
         local md = U.try("obj.getModData", function() return obj:getModData() end)
         if md then md.TARDIS = tag end
@@ -361,9 +421,9 @@ end
 --- actually arrived and returns the ids that did not.
 ---
 --- U.stock walks a list and hopes; this guarantees coverage and then proves
---- it. Containers have a capacity, and once it is reached the engine drops
---- further items without raising anything, so a crate meant to hold every
---- calibre can quietly end up holding a handful. Anything that fails to land
+--- it. What fails here is not capacity -- `AddItem` never checks it -- but an
+--- id the script manager cannot resolve, or one marked obsolete: both return
+--- null and log nothing the mod can see. Anything that fails to land
 --- is returned so the caller can log it rather than leave a hole nobody
 --- notices until they go looking for 5.56 and it is not there.
 function U.stockEach(obj, list, copies)
@@ -395,6 +455,51 @@ function U.stockEach(obj, list, copies)
         if not present[id] then table.insert(missing, id) end
     end
     return present, missing
+end
+
+--- Puts an explicit number of each entry into a container.
+---
+--- U.stock and U.stockEach both decide the quantities themselves; a kit is a
+--- packing list -- a hundred bandages, fifteen tins of each thing, one tin
+--- opener -- so this takes the counts as given and then reads the container
+--- back to prove they arrived: an id the script manager cannot resolve adds
+--- nothing and says nothing. (Capacity is not what stops a kit -- `AddItem`
+--- never checks it. It only stops the player putting things back.)
+---
+--- Takes the ItemContainer itself rather than the object holding it. The
+--- console is a world item, and its container comes from item:getInventory()
+--- rather than from any square.
+function U.stockKit(container, kit)
+    if not container or not kit then return {}, {} end
+
+    local put = U.batch("stockKit.AddItems")
+    for _, entry in ipairs(kit) do
+        local id, want = entry[1], entry[2] or 1
+        put(function() return container:AddItems(id, want) end)
+    end
+
+    local present = {}
+    U.try("stockKit.readBack", function()
+        local items = container:getItems()
+        if not items then return end
+        for i = 0, items:size() - 1 do
+            local it = items:get(i)
+            if it then
+                local t = it:getFullType()
+                present[t] = (present[t] or 0) + 1
+            end
+        end
+    end)
+
+    local short = {}
+    for _, entry in ipairs(kit) do
+        local id, want = entry[1], entry[2] or 1
+        local got = present[id] or 0
+        if got < want then
+            table.insert(short, string.format("%s %d/%d", id, got, want))
+        end
+    end
+    return present, short
 end
 
 ---------------------------------------------------------------------------

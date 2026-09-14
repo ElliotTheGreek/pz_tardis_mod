@@ -141,6 +141,12 @@ for ... do join(function() room:addSquare(sq) end) end
 
 ### Furnishing a deck
 
+**Draw the layout before believing it.** `tools/tileview.py` composites sprites
+over a floor tile, and a few squares of a run laid out that way shows what a
+deck will look like without a game round trip -- an appliance run with a second
+row of counters in front of it turns out to hide everything behind it, which is
+obvious in a picture and invisible in the code.
+
 Each deck has one function in `TARDIS_Build.lua`, keyed by `deck.id`:
 
 ```lua
@@ -162,10 +168,45 @@ an offset inside the deck. `opts` takes:
 | `amount` | items per container |
 | `tag` | mod-data tag — **required for anything that should survive a rebuild** |
 
-The armoury on the stores deck is the worked example of a *packed* container
-rather than a seeded one: military crates hold fifty, so each is stocked with
-30-40 picks from `C.Loot.firearms`, `gunMags`, `gunAmmo` and `attachments`,
-which together cover every firearm, magazine, calibre and optic in the build.
+The armoury is the worked example of a *packed* container rather than a seeded
+one. `ARMOURY` in `TARDIS_Build.lua` is a list of crate specs — a loot list, a
+number of copies of it, and a tag — and `armouryBay(deck, spots, specs)` puts
+one crate on each offset it is given. The console room gets the six core
+crates; the stores deck gets those plus four heavy ones.
+
+**Capacity is a weight, and it binds the player, not the mod.** A military
+crate holds 50, a locker 40, a set of metal shelves 30. `ItemContainer.AddItem`
+does **no capacity check at all** — verified by disassembling it — so
+everything the mod puts in goes in, however much it is. What an over-filled
+container costs is the player: they can take out of it and cannot put anything
+back until it is under its capacity again. So the loot lists in `C.Loot` are
+split by *what a crate is for* rather than by what an item is, each carries the
+weight of one copy of it in a comment, and `copies` is chosen so no crate ends
+up over about 48 and unusable as storage:
+
+| crate | list | copies | weight |
+|---|---|---|---|
+| sidearms | `handguns` + `katanas` | 3 | 35.1 |
+| long guns | `longarms` | 1 | 42.0 |
+| magazines | `gunMags` | 6 | 7.2 |
+| pistol ammunition | `pistolAmmo` | 6 | 29.5 |
+| optics | `attachments` | 4 | 11.2 |
+| holsters | `holsters` | 4 | 8.8 |
+| pistol cartons | `pistolCartons` | 1 | 48.0 |
+| rifle cartons | `rifleCartons` | 1 | 32.0 |
+| 5.56 ×2 | `ammo556` | 8 | 45.9 each |
+| katanas | `katanas` | 4 | 8.0 |
+
+Cartons are what forces most of that: one carton of .44 weighs twelve, a
+quarter of a crate on its own, which is why the shelves and lockers get
+`C.Loot.gunAmmo` — everything *except* the cartons — and the cartons get
+crates of their own.
+
+The two 5.56 crates are the M16's, and they are the reason the calibre has its
+own list. `Base.AssaultRifle` and `Base.JS14_Rifle` both feed on
+`base:bullets_556`; eight copies of `C.Loot.ammo556` is eight cartons, eight
+boxes, loose rounds and magazines per crate, a little under two thousand
+rounds each.
 
 **Tag everything you place.** `U.clearSquare` keeps tagged objects and
 destroys untagged ones, so an untagged shelf is wiped on the next rebuild.
@@ -207,6 +248,36 @@ python tools/pzcatalog.py sprites name furniture_bedding
 
 Useful properties: `container` (shelves, crate, locker, fridge, stove,
 counter…), `bed`, `lightswitch`, `waterAmount`, `solidfloor`, `wall`.
+
+**`IsTableTop` sprites are drawn standing on something.** A lamp, a radio, a
+microwave, a counter basin: the art is drawn already raised to counter height,
+so it lines up on a counter and *floats* anywhere else. Pulled out of
+`Tiles2x.pack`, `fixtures_sinks_01_0` is 35×20 of art sitting entirely above
+the floor diamond — a basin, not a sink. Left on bare floor it hangs over the
+square behind and reads as a sink sunk into that square's floor, which is
+exactly how it looked in game.
+
+`U.addObject` corrects it: `renderYOffset = Surface − whatever it stands on`,
+so a basin on a counter gets 0 and one on bare floor gets +34. It applies to
+everything placed and everything found already placed, so a rebuild repairs an
+old deck.
+
+**The sign is the opposite of the game's own code.**
+`ISMoveableSpriteProps:placeMoveableInternal` computes `under − Surface`, which
+is right for a counter and moves a floor-placed one further up — that was tried
+in 1.9.1 and the sinks disappeared entirely. The game's floor-placement path
+for a table-top item is code nothing exercises: a player puts a basin on a
+counter. Render the sprite against a floor tile and look at it; that is the
+only evidence that settles which way is down.
+
+**Prefer the right sprite over an offset.** `C.Sprites.sink` is a pedestal sink
+that stands on the floor by itself (`fixtures_sinks_01_28/12/13/29`), for a wet
+block; `C.Sprites.sinkBasin` is the counter basin, and the galley puts a
+counter down first and the basin on top of it. Same for the microwave.
+`python tools/pzcatalog.py sprites name fixtures_sinks` lists the set;
+`IsTableTop`, `IsSurfaceOffset` and `Surface` are the flags that matter, and
+`python tools/tileview.py --where <sprite>` says whether the art stands on the
+floor at all.
 
 Wall tilesets follow a pattern: index 0 is the **west** face, 1 the **north**
 face, 2 the corner post. Multi-tile furniture is consecutive (a bed is
@@ -275,6 +346,65 @@ z 0 is the ground, so six decks is the limit of a strictly descending stack.
 To go further, either start higher (`z` up to 31 — the engine's ceiling, per
 `IsoCell.getMaxHeight()`) or let decks share a z and separate them by `col`
 alone, which the layout already tolerates.
+
+### The console is the hold
+
+The console in the middle of the control room is a world item, not a tile
+object, so it cannot carry a container the way a shelf does — a shelf's
+container comes from its sprite properties, and the console has no sprite.
+
+What it can be instead is a **container item**. `ISInventoryPage` walks the
+world objects on the squares around the player and gives its own button to
+every item whose category is `Container`, which is how a bag on the floor is
+lootable. So `TARDISConsoleUnit` is declared `ItemType = base:container` with
+`Capacity = 500`, and the model opens like a crate.
+
+Two things follow from that.
+
+**It is a different item id from the console every world before revision 11
+had.** An item saved by one class and reloaded as another reads a section of
+the save that was never written, and the old console was a plain
+`InventoryItem`. `C.LegacyConsoleItem` stays declared in `tardis.txt` so an
+existing world can still resolve it, and `furnish.console` lifts it off the
+square with `sq:removeWorldObject` and puts the container down in its place.
+
+**It is stocked exactly once**, when it is first placed, from `C.ConsoleKit`.
+That is a packing list rather than a loot list — explicit counts, not a
+spread — and `U.stockKit` reads the container back afterwards and logs
+anything that did not fit.
+
+### A container cannot be made bigger than the engine allows
+
+This is the constraint the hold ran into, and it is worth stating plainly
+because nothing about it is visible from the script side. Two ceilings, both
+in `ItemContainer.getCapacity()`:
+
+- a container that belongs to an **item** returns `min(capacity, 50)`, and
+  `InventoryContainer.getCapacity()` then clamps that again to
+  **50 − the item's own weight**;
+- a container that belongs to a world **object** returns `min(capacity, 100)`.
+
+So `Capacity = 500` is not a bigger container, it is a 50. On an item weighing
+80 it is **−30**: a hold everything can come out of and nothing can go into,
+which is exactly how it read in game. The console item therefore weighs 1 and
+carries 49.
+
+`AddItems` does not check any of this, so the kit went in regardless — the cap
+is enforced when a *player* moves something in, not when the mod does.
+
+**The way to a bigger hold is more containers, not a bigger one.**
+`C.ConsoleHold` is a ring of six crates on the rug around the console, each
+raised from the crate sprite's 50 to the object ceiling of 100 with
+`setCapacity`, named "TARDIS Hold" so the loot panel does not just say
+*Crate*. The four squares orthogonally adjacent to the console are left clear
+so it can still be walked up to.
+
+`spillHold` then moves the heavy end of the console's contents out into the
+ring, heaviest first, until the console is inside its 49 — which leaves the
+console holding what you would want on the way out (screwdrivers, pills,
+bandages, a pistol) and the cartons and tins in the crates. It runs on every
+build, not only the first, so a world that already had the whole kit piled
+into the console is put right the next time the deck is built.
 
 ### The sonic screwdriver
 

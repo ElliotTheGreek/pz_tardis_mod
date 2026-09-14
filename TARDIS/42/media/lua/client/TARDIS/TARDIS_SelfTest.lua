@@ -359,6 +359,116 @@ local function buildSteps(player)
                       .. held)
                 return DONE
             end)
+
+            -- The console is a container item, and the only thing that
+            -- settles whether the hold exists is reading it back off the
+            -- square: a plain item and a container item look identical until
+            -- something asks one of them for an inventory.
+            add("console hold", function()
+                local rx, ry = U.deckOrigin(deck)
+                local sq = U.square(rx + 12, ry + 12, deck.z, false)
+                local console, legacy, count = nil, 0, 0
+                if sq then
+                    U.try("holdScan", function()
+                        local items = sq:getWorldObjects()
+                        if not items then return end
+                        for i = 0, items:size() - 1 do
+                            local wo = items:get(i)
+                            local item = wo and wo:getItem()
+                            local id = item and item:getFullType()
+                            if id == C.ConsoleItem then
+                                console = item
+                            elseif id == C.LegacyConsoleItem then
+                                legacy = legacy + 1
+                            end
+                        end
+                    end)
+                end
+                check("console.present", console ~= nil,
+                      "no console item on the centre square")
+                check("console.legacyGone", legacy == 0,
+                      legacy .. " old plain console item(s) still standing")
+
+                local hold = console and U.try("holdInventory", function()
+                    return console:getInventory()
+                end)
+                check("console.hold", hold ~= nil,
+                      "the console item carries no container")
+                if hold then
+                    U.try("holdCount", function()
+                        local items = hold:getItems()
+                        count = items and items:size() or 0
+                    end)
+                    -- Only that it was stocked, not with what: the hold is
+                    -- the player's the moment they open it.
+                    check("console.stocked", count > 0, "the hold is empty")
+                    local weight = U.try("holdWeight", function()
+                        return hold:getCapacityWeight()
+                    end) or -1
+                    local cap = U.try("holdCapacity", function()
+                        return hold:getCapacity()
+                    end) or -1
+                    -- The engine clamps an item's container to 50 minus the
+                    -- item's own weight, so a console that is too heavy reads
+                    -- as negative capacity: everything can come out and
+                    -- nothing can go back in.
+                    check("console.capacity", cap > 0,
+                          "hold capacity is " .. cap .. "; the console item is too heavy")
+                    check("console.roomLeft", weight <= cap,
+                          "hold holds " .. math.floor(weight) .. " of " .. cap
+                          .. "; the spill into the ring did not run")
+                    info("console hold: %d items, %.0f of %d capacity",
+                         count, weight, cap)
+                end
+
+                -- The ring is the rest of the hold, and the only part of it
+                -- that can be made large.
+                local ring, ringCap = 0, 0
+                for _, spot in ipairs(C.ConsoleHold.spots) do
+                    local csq = U.square(rx + spot[1], ry + spot[2], deck.z, false)
+                    if csq then
+                        U.eachObject(csq, function(o)
+                            local md = o:getModData()
+                            if not (md and md.TARDIS == "hold") then return end
+                            local c = U.containerOf(o)
+                            if not c then return end
+                            ring = ring + 1
+                            ringCap = ringCap + (U.try("ringCapacity", function()
+                                return c:getCapacity()
+                            end) or 0)
+                        end)
+                    end
+                end
+                check("console.ring", ring == #C.ConsoleHold.spots,
+                      "expected " .. #C.ConsoleHold.spots
+                      .. " hold crates around the console, found " .. ring)
+                info("console ring: %d crates, %d capacity", ring, ringCap)
+                return DONE
+            end)
+
+            -- The galley corner. A sprite that does not land leaves an empty
+            -- square and no error anywhere, so the sinks are checked by
+            -- reading the squares back rather than by trusting the placement.
+            add("console galley", function()
+                local rx, ry = U.deckOrigin(deck)
+                local function tagged(ox, oy, want)
+                    local gsq = U.square(rx + ox, ry + oy, deck.z, false)
+                    local found = false
+                    if gsq then
+                        U.eachObject(gsq, function(o)
+                            local md = o:getModData()
+                            if md and md.TARDIS == want then found = true end
+                        end)
+                    end
+                    return found
+                end
+                check("galley.sink", tagged(5, 20, "sink"),
+                      "no sink at the head of the galley run")
+                check("galley.oven", tagged(6, 20, "oven"), "no oven")
+                check("galley.aisleClear", not tagged(6, 21, "counter"),
+                      "row 21 should be the aisle in front of the run")
+                return DONE
+            end)
         end
     end
 
