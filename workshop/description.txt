@@ -9,7 +9,7 @@ A working TARDIS for Project Zomboid Build 42 (single player). Materialise the p
 [*][b]Galley Deck[/b] -- a kitchen with working ranges and running water, a dining room and a pantry.
 [*][b]Gardens[/b] -- crop beds already sown under grow lamps, seed cabinets, a potting bench and a stable of livestock.
 [/list]
-Sit in the chairs, sleep in the beds, cook on the ranges. The sinks, basins, baths and troughs never run dry.
+Sit in the chairs, sleep in the beds, cook on the ranges. The ship makes its own power, so the fridges stay cold after the grid goes down, and the sinks, basins, baths and troughs never run dry.
 
 [h2]THE HOLD[/h2]
 The console itself and six roundel lockers make up the ship's hold, packed with its kit: an infirmary's worth of medicine, tins and dry stores, sidearms, and an M16 with sixteen hundred rounds. The armouries hold every firearm in the game, every magazine and every calibre.
@@ -18,7 +18,7 @@ The console itself and six roundel lockers make up the ship's hold, packed with 
 Right-click anywhere inside for the TARDIS menu. Open the flight console, click anywhere on the world map (the map is fully revealed while you steer) or pick a saved bookmark, and the ship lands on the nearest open ground when you next step outside. Move between decks from the same menu.
 
 [h2]THE SONIC SCREWDRIVER[/h2]
-Three of them wait in a glass case beside the doors. Carry one and every lock within fifteen tiles opens as you walk past: house doors, gates, padlocks, keypads, window latches, car doors and boots. Cars in reach are hotwired and get a charge in a flat battery. It does not fill the tank.
+Three of them wait in a glass case beside the doors. Carry one, right-click a locked door, gate, window or car and choose Use sonic screwdriver: a moment's work and the lock gives way -- house doors, gates, padlocks, keypads, window latches, car doors and boots. A car is hotwired and gets a charge in a flat battery too. It does not fill the tank.
 
 [h2]AND[/h2]
 [list]

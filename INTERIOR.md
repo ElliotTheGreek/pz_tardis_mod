@@ -235,8 +235,9 @@ nothing; they will find it in the new cupboards, or in a heap by the landing.
    models and are unchanged: this was the interior.
 3. **Lighting is lampposts**, not fittings with switches: the roundel lights
    and grow lamps are pictures, and the light comes from the layout's spots.
-4. **Fridges and the range need power** the way vanilla's do; the ship does
-   not generate its own (as before).
+4. **The ship makes its own power** (2.0.1, `B.powerDeck`): generator
+   positions registered on each deck's chunks, with no generator behind them.
+   `setHaveElectricity`, which this used before, never did anything.
 5. **It may rain inside.** A runtime deck has no rooms and no roof, so the
    engine thinks it is outdoors. The Shuttlecraft fixed this with an invisible
    floor one storey up (`U.addRoof`); the TARDIS has not had it yet.

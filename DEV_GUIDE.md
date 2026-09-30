@@ -34,7 +34,7 @@ fal TRELLIS), see `INTERIOR.md` section 4.
 |---|---|
 | `C:\Users\Arcade\tardis` | this repo |
 | `C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid` | game install |
-| `C:\Users\Arcade\Zomboid\mods\TARDIS` | where `tools/deploy.sh` installs to |
+| `C:\Users\Arcade\Zomboid\mods\TARDISDev` | where `tools/deploy.sh` installs to, as **TARDIS [DEV]** |
 | `C:\Users\Arcade\Zomboid\console.txt` | the game log, **overwritten each launch** |
 
 Target is **build 42.20.4**. Single player only.
@@ -63,6 +63,12 @@ sh tools/deploy.sh
 # 4. read what happened
 sh tools/readtest.sh
 ```
+
+`deploy.sh` installs the repo as **TARDIS [DEV]** (id `TARDISDev`), so it
+sits beside the Workshop release (id `TARDIS`) in the mod list. Enable one or
+the other for a world, **never both**: they share every Lua path, item id and
+tile, and would load over each other. The repo's `mod.info` is the release one;
+only the installed copy is renamed.
 
 **Mod Lua only loads when a world starts**, not at the main menu, and it is
 only re-read on game restart. There is no hot reload. Every code change needs
@@ -146,6 +152,33 @@ python tools/pzapi.py zombie.vehicles.VehicleParts         # there it is
 that calls `vehicle:getBattery()` on a `BaseVehicle`. That method does not
 exist. Dead or broken code in the game's own scripts is common enough that it
 cannot be used as evidence.
+
+### A setter is not proof that anything reads it
+
+`pzapi.py` shows signatures, not bodies. For *what a method does*, decompile
+it with CFR and the game's own Java (both run without installing anything):
+
+```sh
+J="/c/Program Files (x86)/Steam/steamapps/common/ProjectZomboid/jre64/bin/java.exe"
+JAR="/c/Program Files (x86)/Steam/steamapps/common/ProjectZomboid/projectzomboid.jar"
+curl -sL -o cfr.jar https://github.com/leibnitz27/cfr/releases/download/0.152/cfr-0.152.jar
+unzip -o -q "$JAR" zombie/iso/IsoGridSquare.class -d x
+"$J" -jar cfr.jar x/zombie/iso/IsoGridSquare.class --methodname haveElectricity
+```
+
+That is how 2.0.1 found that **the ship never had power**. The builder called
+`sq:setHaveElectricity(true)` on every square from the start, and in 42.20
+`haveElectricity()` never reads that flag: it asks the square's chunk whether
+a generator position on its list is in range. Grid power needs a room, which a
+runtime deck cannot have. Nothing threw, nothing warned, and every fridge on
+the ship was warm. A player reported it as "the TARDIS has no power".
+
+`B.powerDeck` now registers generator positions on the deck's chunks
+(`IsoChunk.addGeneratorPos`) with no generator behind them, so no fuel, noise
+or fire. The engine drops such a position whenever a neighbouring chunk loads
+(`checkForMissingGenerators`), so they are re-registered from the player
+update once a second, like the lamps. `tests/test_build.py` models the
+chunks and checks every deck square is in range at three generator ranges.
 
 ### A zombie's appearance is fixed when it spawns
 
@@ -378,7 +411,8 @@ which is unwelcome mid-game. `TARDIS_SelfTest()` from the debug console forces
 it. `TARDIS_Rebuild()` tears down and regenerates the deck you are standing on,
 fully restocked, for design iteration. `TARDIS_Sonic()` forces one lock sweep
 where you stand and reports how many locks gave way, without needing to be
-carrying a screwdriver. `TARDIS_Ghosts()` lists old shells still waiting to be
+carrying a screwdriver. (In play the screwdriver is used from the right-click
+menu on one door or car; the sweep is the old auto field, `C.SonicAuto`.) `TARDIS_Ghosts()` lists old shells still waiting to be
 cleared and sweeps up any near you.
 
 ### Watching the log
@@ -411,8 +445,10 @@ then in game: Workshop → Create and update items → TARDIS → upload. The
 listing text is `workshop/description.txt`; the thumbnail is cut from a clean
 render of the console room (`PREVIEW_BOX`).
 
-**After the first upload, copy the `id=` the game writes into
-`~/Zomboid/Workshop/TARDIS/workshop.txt` into `WORKSHOP_ID` in the script.**
+The published item is **3810732908**, and `WORKSHOP_ID` holds it. For the
+record: **after the first upload, the `id=` the game writes into
+`~/Zomboid/Workshop/TARDIS/workshop.txt` has to be copied into `WORKSHOP_ID`
+in the script.**
 That id is the only thing that makes the next upload an update rather than a
 second, separate item, and there is no undo. Until it is copied, `--install`
 keeps the staged id rather than wiping it.
@@ -481,7 +517,20 @@ on its side), and **1 unit is 1 tile**, with `scale` set in
 
 ## Current state
 
-Version **2.0.0**, build revision **16**.
+Version **2.0.1**, build revision **16**.
+
+**2.0.1** answers the first player feedback, and **none of it has been seen in
+game yet**:
+
+- **The ship has power** (`B.powerDeck`, see *A setter is not proof that
+  anything reads it*). Look for the galley fridges cooling and the range
+  heating; no `[TARDIS] WARN (power.` line. No rebuild is needed or triggered:
+  the power is registered from the player update on every deck already built.
+- **The sonic screwdriver is used from the menu**, not carried as a field:
+  right-click a locked door or car, **Use sonic screwdriver on ...**, a timed
+  action with a progress bar, then `sonic: used at x,y,z -- ...` in the log.
+  The old field is `C.SonicAuto`, off. Check both a door and a car; and that
+  walking away mid-action cancels it.
 
 **2.0.0 regenerates the whole interior** with the Shuttlecraft's pipeline
 (`INTERIOR.md`): 11 Gemini surfaces, 47 pieces of furniture and wall art
@@ -515,7 +564,9 @@ seen in game yet.** On the first load, look for:
 
 Working and confirmed in game before 2.0.0, and not changed by it: summoning,
 enter/exit, travel by map, bookmarks, the void margin, the repulsion field,
-the sonic screwdriver (locks, vehicle unlocking, hotwiring, the battery jump).
+the sonic screwdriver's unlocks themselves (locks, vehicle unlocking,
+hotwiring, the battery jump) -- the calls are unchanged in 2.0.1; only how
+they are triggered is new.
 
 Daleks were attempted and removed -- see *A zombie's appearance is fixed when
 it spawns*. `tools/gen_dalek.py` is kept: the model itself was good and
@@ -541,7 +592,7 @@ TARDIS/42/media/lua/shared/TARDIS/TARDIS_Util.lua     safe wrappers, state, geom
 TARDIS/42/media/lua/client/TARDIS/TARDIS_Build.lua    places the layout, stocks it, the refit
 TARDIS/42/media/lua/client/TARDIS/TARDIS_Core.lua     shell, doors, arrival, field
 TARDIS/42/media/lua/client/TARDIS/TARDIS_Travel.lua   map, bookmarks, landing
-TARDIS/42/media/lua/client/TARDIS/TARDIS_Sonic.lua    sonic screwdriver, lock sweep
+TARDIS/42/media/lua/client/TARDIS/TARDIS_Sonic.lua    sonic screwdriver: menu targets, timed action, sweep
 TARDIS/42/media/lua/client/TARDIS/TARDIS_Menu.lua     right-click menus
 TARDIS/42/media/lua/client/TARDIS/TARDIS_SelfTest.lua in-game step machine
 TARDIS/42/media/texturepacks/tardis_interior.pack    the interior's tiles (GENERATED)

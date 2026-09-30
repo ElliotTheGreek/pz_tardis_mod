@@ -13,7 +13,7 @@ TARDIS = TARDIS or {}
 local C = {}
 TARDIS.Config = C
 
-C.Version   = "2.0.0"
+C.Version   = "2.0.1"
 C.StateKey  = "TARDIS_State_v1"
 C.ModPrefix = "[TARDIS]"
 
@@ -120,18 +120,34 @@ C.HoldPieces = { console = true, hold_locker = true }
 ---------------------------------------------------------------------------
 -- The sonic screwdriver
 ---------------------------------------------------------------------------
--- Carrying one opens locks. TARDIS_Sonic.lua sweeps the squares around
--- whoever is holding it and unlocks every door, gate, window and vehicle it
--- finds; it has no other use and needs no action from the player.
+-- Right-click a locked door, gate, window or vehicle while carrying one and
+-- the menu offers it (TARDIS_Sonic.lua, TARDISSonicAction): a short timed
+-- action, and the lock gives way.
 --
 -- Two names for one item: the engine's inventory search compares the bare
 -- type, while anything that spawns or places the item wants the full id.
 C.SonicItem = "TARDIS.TARDISSonicScrewdriver"
 C.SonicType = "TARDISSonicScrewdriver"
 
--- How far the field reaches, in tiles, on the carrier's own level. Every
+-- How close, in tiles, the player must be to use it without walking over
+-- first. A little further than arm's length: it is a sonic screwdriver.
+C.SonicReach = 3
+
+-- How long the timed action takes, in the engine's action time units (moving
+-- an item between containers is roughly 20-50): a lock, and a vehicle, which
+-- gets its locks, ignition and battery seen to in the one go.
+C.SonicLockTime    = 100
+C.SonicVehicleTime = 200
+
+-- The old behaviour, off by default: every lock within C.SonicRadius of the
+-- carrier opening on its own, with no action from the player. Players asked
+-- for the screwdriver to be something you use instead.
+C.SonicAuto = false
+
+-- How far that field reaches, in tiles, on the carrier's own level. Every
 -- square inside it is examined on each sweep, so this is the number that
 -- decides what a sweep costs; 15 is a good-sized house in every direction.
+-- TARDIS_Sonic() from the debug console sweeps this far too.
 C.SonicRadius = 15
 
 -- What the field does to a vehicle once its doors are open. Unlocking alone
@@ -148,7 +164,7 @@ C.SonicRadius = 15
 C.SonicHotwire   = true
 C.SonicJumpStart = true
 
--- Sweeps run when the carrier steps onto a new square, and otherwise no more
+-- With C.SonicAuto, sweeps run when the carrier steps onto a new square, and otherwise no more
 -- often than this many ticks apart, so standing still is nearly free.
 C.SonicInterval = 120
 

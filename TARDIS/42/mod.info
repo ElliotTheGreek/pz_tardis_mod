@@ -5,6 +5,6 @@ description=A working TARDIS. Right-click any free tile to materialise the polic
 author=built for Arcade
 category=build
 versionMin=42.0
-modversion=2.0.0
+modversion=2.0.1
 pack=tardis_interior
 tiledef=tardis_interior 1963

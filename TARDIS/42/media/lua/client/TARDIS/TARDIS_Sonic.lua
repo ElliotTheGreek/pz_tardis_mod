@@ -1,11 +1,18 @@
 --[[ TARDIS -- the sonic screwdriver.
 
-    Carrying one opens locks. There is nothing to aim and nothing to click:
-    while the screwdriver is anywhere in the carrier's inventory, every lock
-    within C.SonicRadius of them gives way -- house doors, player-built doors
-    and gates, padlocks, keypads, window latches, car doors and boots.
+    Carrying one lets you open locks. Right-click a locked door, gate, window
+    or vehicle and choose the sonic screwdriver: the character walks over if
+    it is out of reach (C.SonicReach), works at it for a moment with a
+    progress bar like any other timed action, and the lock gives way -- house
+    doors, player-built doors and gates, padlocks, keypads, window latches,
+    car doors and boots, and a vehicle's ignition and battery as well.
 
-    Two things shape how this is written.
+    Up to 2.0.0 it was a field: every lock within C.SonicRadius of the carrier
+    opened on its own. Players asked for it to be something you *use*, so that
+    is now off by default and kept behind C.SonicAuto. The sweep below is what
+    the field ran, and TARDIS_Sonic() still runs one from the debug console.
+
+    Two things shape how the sweep is written.
 
     A sweep looks at every square in a square of side 2r+1, so it has to be
     cheap and it has to be rare. It reads each square's *special* object list
@@ -26,6 +33,7 @@
 
 require "TARDIS/TARDIS_Config"
 require "TARDIS/TARDIS_Util"
+require "TimedActions/ISBaseTimedAction"
 
 TARDIS = TARDIS or {}
 local C = TARDIS.Config
@@ -318,7 +326,189 @@ function S.sweep(player)
 end
 
 ---------------------------------------------------------------------------
--- When to sweep
+-- Using it on one thing
+---------------------------------------------------------------------------
+-- Read-only: what the right-click menu needs to decide whether to offer the
+-- screwdriver at all. Each read goes through the batch it is given, for the
+-- same reason the unlocks do.
+local function lockedObject(o, scan)
+    return scan(function()
+        if instanceof(o, "IsoDoor") then
+            return o:isLocked() or o:isLockedByKey()
+        elseif instanceof(o, "IsoThumpable") then
+            return o:isLocked() or o:isLockedByKey() or o:isLockedByPadlock()
+                or (o:getLockedByCode() or 0) > 0
+        elseif instanceof(o, "IsoWindow") then
+            return o:isLocked()
+        end
+        return false
+    end) == true
+end
+
+--- True when the screwdriver has something to do to a vehicle: a lock, the
+--- ignition, or a flat battery that is actually fitted.
+local function vehicleNeedsWork(v, scan)
+    return scan(function()
+        if v:isAnyDoorLocked() or v:isTrunkLocked() then return true end
+        if C.SonicHotwire and (not v:isHotwired() or v:isHotwiredBroken()) then return true end
+        if C.SonicJumpStart and not v:hasLiveBattery() then
+            local battery = v:getParts() and v:getParts():getBattery()
+            return battery ~= nil and battery:getInventoryItem() ~= nil
+        end
+        return false
+    end) == true
+end
+
+--- What a right-click on `sq` could use the screwdriver on. `worldobjects`
+--- is the menu's own list of what was clicked; the square's door and special
+--- objects are read as well, since a click on a door frame does not always
+--- put the door in that list. Vehicles are taken from the clicked square or
+--- one next to it -- a car is a big thing to click and an easy one to miss by
+--- a square. Returns nil when there is nothing locked there.
+function S.targetAt(sq, worldobjects)
+    if not sq then return nil end
+    local scan = U.batch("sonic.target")
+    local locks, seen = {}, {}
+    local function consider(o)
+        if o and not seen[o] then
+            seen[o] = true
+            if lockedObject(o, scan) then table.insert(locks, o) end
+        end
+    end
+    for _, o in ipairs(worldobjects or {}) do consider(o) end
+    consider(scan(function() return sq:getIsoDoor() end))
+    local special = scan(function() return sq:getSpecialObjects() end)
+    local n = special and scan(function() return special:size() end) or 0
+    for i = 0, n - 1 do consider(scan(function() return special:get(i) end)) end
+
+    local vehicle = scan(function() return sq:getVehicleContainer() end)
+    if not vehicle then
+        for dx = -1, 1 do
+            for dy = -1, 1 do
+                local near = not vehicle and U.square(sq:getX() + dx, sq:getY() + dy, sq:getZ(), false)
+                if near then vehicle = scan(function() return near:getVehicleContainer() end) end
+            end
+        end
+    end
+    if vehicle and not vehicleNeedsWork(vehicle, scan) then vehicle = nil end
+
+    if #locks == 0 and not vehicle then return nil end
+    return { sq = sq, locks = locks, vehicle = vehicle }
+end
+
+--- Does the work on one target and says what happened. The same unlocks the
+--- sweep uses, so the two cannot drift apart.
+local function applyTo(player, target)
+    local join = batches()
+    local t = { doors = 0, found = 0, vehicles = 0, hotwired = 0, jumped = 0, noBattery = 0 }
+    for _, o in ipairs(target.locks) do
+        if unlockObject(o, join) then t.doors = t.doors + 1 end
+    end
+    local v = target.vehicle
+    if v then
+        t.found = 1
+        if unlockVehicle(v, join.vehicle) then t.vehicles = 1 end
+        if hotwireVehicle(v, join.hotwire) then t.hotwired = 1 end
+        local charged, missing = jumpVehicle(v, join.battery)
+        if charged then t.jumped = 1 end
+        if missing then t.noBattery = 1 end
+    end
+    U.log("sonic: used at %d,%d,%d -- %d lock(s) opened; vehicle: %d unlocked, "
+          .. "%d hotwired, %d jumped, %d with no battery",
+          target.sq:getX(), target.sq:getY(), target.sq:getZ(),
+          t.doors, t.vehicles, t.hotwired, t.jumped, t.noBattery)
+    local text
+    if t.hotwired + t.jumped > 0 then
+        text = getText("IGUI_TARDIS_SonicVehicleReady", 1)
+    elseif t.vehicles > 0 then
+        text = getText("IGUI_TARDIS_SonicVehicle", 1)
+    elseif t.doors > 0 then
+        text = getText("IGUI_TARDIS_SonicOpened", t.doors)
+    end
+    if text then
+        U.try("sonic.note", function() player:setHaloNote(text, 150, 210, 255, 200) end)
+    end
+    return t
+end
+
+-- The timed action: a moment spent working the lock, with the progress bar,
+-- the same way moving an item takes a moment. Walking or aiming cancels it.
+TARDISSonicAction = ISBaseTimedAction:derive("TARDISSonicAction")
+
+function TARDISSonicAction:isValid()
+    if not S.carriedBy(self.character) then return false end
+    for _, o in ipairs(self.target.locks) do
+        if U.try("sonic.valid", function() return o:getObjectIndex() end) ~= -1 then return true end
+    end
+    return self.target.vehicle ~= nil
+end
+
+function TARDISSonicAction:face()
+    local what = self.target.vehicle or self.target.locks[1]
+    U.try("sonic.face", function() self.character:faceThisObject(what) end)
+end
+
+function TARDISSonicAction:start()
+    self:face()
+    self:setActionAnim(self.target.vehicle and "VehicleWorkOnMid" or "Loot")
+end
+
+function TARDISSonicAction:update()
+    self:face()
+end
+
+function TARDISSonicAction:stop()
+    ISBaseTimedAction.stop(self)
+end
+
+function TARDISSonicAction:perform()
+    applyTo(self.character, self.target)
+    -- A door clicks open the way a key would have opened it.
+    local door = self.target.locks[1]
+    if door and instanceof(door, "IsoDoor") then
+        U.try("sonic.sound", function()
+            local props = door:getSprite() and door:getSprite():getProperties()
+            local prefix = props and props:has("DoorSound") and props:get("DoorSound") or "WoodDoor"
+            self.character:getEmitter():playSound(prefix .. "Unlock")
+        end)
+    end
+    -- needed to remove from queue / start next.
+    ISBaseTimedAction.perform(self)
+end
+
+function TARDISSonicAction:new(character, target)
+    local o = ISBaseTimedAction.new(self, character)
+    o.target = target
+    o.maxTime = target.vehicle and C.SonicVehicleTime or C.SonicLockTime
+    return o
+end
+
+--- Queues the screwdriver on a target: a walk first if it is out of reach,
+--- then the action itself.
+function S.use(player, target)
+    local v = target.vehicle
+    local far
+    if v then
+        far = (U.try("sonic.dist", function() return player:DistTo(v) end) or 0) > C.SonicReach
+    else
+        far = (U.try("sonic.dist", function()
+            return player:DistTo(target.sq:getX(), target.sq:getY())
+        end) or 0) > C.SonicReach
+            or math.floor(player:getZ()) ~= target.sq:getZ()
+    end
+    ISTimedActionQueue.clear(player)
+    if far then
+        if v then
+            ISTimedActionQueue.add(ISPathFindAction:pathToVehicleAdjacent(player, v))
+        elseif not luautils.walkAdjWindowOrDoor(player, target.sq, target.locks[1], true) then
+            luautils.walkAdj(player, target.sq, true)
+        end
+    end
+    ISTimedActionQueue.add(TARDISSonicAction:new(player, target))
+end
+
+---------------------------------------------------------------------------
+-- When to sweep (only with C.SonicAuto)
 ---------------------------------------------------------------------------
 -- Standing still costs one sweep every C.SonicInterval ticks. Walking costs
 -- one per square entered, but never two closer together than a fifth of a
@@ -328,7 +518,7 @@ local MIN_GAP = 12
 local last = { x = nil, y = nil, z = nil, gap = 0, idle = 0 }
 
 local function onPlayerUpdate(player)
-    if not player then return end
+    if not player or not C.SonicAuto then return end
 
     last.gap = last.gap + 1
     last.idle = last.idle + 1

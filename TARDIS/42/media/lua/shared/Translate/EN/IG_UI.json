@@ -18,6 +18,8 @@
     "IGUI_TARDIS_DestinationSet": "Destination locked: %1, %2",
     "IGUI_TARDIS_NoDestination": "Choose a destination on the map first.",
     "IGUI_TARDIS_NoLandingSite": "No open ground could be found nearby",
+    "IGUI_TARDIS_SonicLock": "Use sonic screwdriver on the lock",
+    "IGUI_TARDIS_SonicCar": "Use sonic screwdriver on the vehicle",
     "IGUI_TARDIS_SonicOpened": "The sonic screwdriver whirrs; %1 lock(s) give way",
     "IGUI_TARDIS_SonicVehicle": "The sonic screwdriver whirrs; %1 vehicle(s) unlock",
     "IGUI_TARDIS_SonicVehicleReady": "The sonic screwdriver whirrs; %1 vehicle(s) unlock and turn over",

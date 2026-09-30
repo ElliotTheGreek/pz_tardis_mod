@@ -568,6 +568,9 @@ local function onPlayerUpdate(player)
     -- The deck's lamps, hung again whenever the engine has dropped one --
     -- lampposts are not saved, so this is also what lights a reloaded ship.
     TARDIS.Build.lightDeck(index)
+    -- And its power: the engine forgets the ship's generator positions
+    -- whenever a neighbouring chunk loads (TARDIS_Build, B.powerDeck).
+    TARDIS.Build.powerDeck(index)
 
     -- Built, but the player is over a hole with nothing under them.
     local sq = U.square(player:getX(), player:getY(), math.floor(player:getZ()), false)

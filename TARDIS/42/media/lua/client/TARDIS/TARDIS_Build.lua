@@ -673,15 +673,67 @@ end
 ---------------------------------------------------------------------------
 -- Lighting and power
 ---------------------------------------------------------------------------
---- Marks the footprint as powered indoor space.
-local function powerDeck(deck)
+-- The ship's own power. Until 2.0.1 this called sq:setHaveElectricity(true)
+-- on every square, which does nothing: in 42.20 IsoGridSquare.haveElectricity
+-- never reads that flag. It asks the square's chunk whether any generator
+-- position on the chunk's list reaches it (IsoChunk.isGeneratorPoweringSquare
+-- -> IsoGenerator.isPoweringSquare, a plain distance test against the
+-- GeneratorTileRange and GeneratorVerticalPowerRange sandbox options). Grid
+-- power is no way round it either: it needs a room, and a runtime deck cannot
+-- have one. So the fridges, freezers and range were dead in every world.
+--
+-- The ship therefore registers generator positions of its own on the chunks
+-- under each deck. There is no IsoGenerator behind them, so no fuel, no
+-- noise, no fumes and no fire. The engine does drop a position with no running
+-- generator on it whenever a neighbouring chunk loads
+-- (IsoChunk.checkForMissingGenerators), so, like the lamps, they are put back
+-- from the player update; addGeneratorPos ignores one already listed.
+--
+-- Points sit on a grid spaced so every square is within the generator range
+-- of one. Each covers one grid cell, no wider than a chunk, so registering it
+-- on the chunks of that cell's four corners reaches every square it powers.
+local powerCheck = 0
+
+local function powerPoints(lay)
+    local r = tonumber(SandboxVars and SandboxVars.GeneratorTileRange) or 20
+    local step = math.max(1, math.min(8, math.floor(r * 1.4)))
+    local half = math.floor(step / 2)
+    local pts = {}
+    for ox = 0, lay.w, step do
+        for oy = 0, lay.h, step do
+            table.insert(pts, { ox, oy, math.min(ox + half, lay.w), math.min(oy + half, lay.h),
+                                math.min(ox + step - 1, lay.w), math.min(oy + step - 1, lay.h) })
+        end
+    end
+    return pts
+end
+
+--- Powers a deck. Cheap enough to call every tick: it does its work once a
+--- second unless `now` is set, which the build does.
+function B.powerDeck(index, now)
+    local deck = C.Decks[index]
     local lay = layoutOf(deck)
-    local power = U.batch("power.setHaveElectricity")
-    for ox = 0, lay.w do
-        for oy = 0, lay.h do
-            local x, y = at(deck, ox, oy)
-            local sq = U.square(x, y, deck.z, false)
-            if sq then power(function() sq:setHaveElectricity(true) end) end
+    local cell = U.cell()
+    if not lay or not cell then return end
+    if not now then
+        powerCheck = powerCheck + 1
+        if powerCheck < 60 then return end
+    end
+    powerCheck = 0
+    if SandboxVars and SandboxVars.AllowExteriorGenerator == false then
+        U.warnOnce("power.exterior", "the sandbox option AllowExteriorGenerator is off; "
+                   .. "any deck square the engine counts as outdoors will have no power")
+    end
+    local join = U.batch("power.addGeneratorPos")
+    for _, p in ipairs(powerPoints(lay)) do
+        local px, py = at(deck, p[3], p[4])
+        for _, corner in ipairs({ { p[1], p[2] }, { p[5], p[2] }, { p[1], p[6] }, { p[5], p[6] } }) do
+            local x, y = at(deck, corner[1], corner[2])
+            if U.chunkLoaded(x, y, deck.z) then
+                join(function()
+                    cell:getChunkForGridSquare(x, y, deck.z):addGeneratorPos(px, py, deck.z)
+                end)
+            end
         end
     end
 end
@@ -795,7 +847,7 @@ function B.buildDeck(index)
                 end
             end
         end },
-        { "power",       function() powerDeck(deck) end },
+        { "power",       function() B.powerDeck(index, true) end },
         { "handBack",    function()
             -- Salvage goes into the new containers first; the ones it fills
             -- are the player's own things again and are not stocked on top.

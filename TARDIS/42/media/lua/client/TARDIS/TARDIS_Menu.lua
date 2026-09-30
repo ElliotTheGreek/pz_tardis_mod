@@ -73,6 +73,10 @@ function M.onChangeDeck(_, player, delta)
     TARDIS.Core.changeDeck(player, delta)
 end
 
+function M.onSonic(_, player, target)
+    TARDIS.Sonic.use(player, target)
+end
+
 ---------------------------------------------------------------------------
 -- Menu assembly
 ---------------------------------------------------------------------------
@@ -103,13 +107,31 @@ local function insideMenu(context, player, worldobjects, test)
     return true
 end
 
+--- The sonic screwdriver, offered on a locked door, gate, window or vehicle
+--- when the player is carrying one. Both at once is possible -- a car parked
+--- against a locked garage door -- and each gets its own line.
+local function sonicMenu(context, player, worldobjects, sq, target)
+    if #target.locks > 0 then
+        context:addOption(getText("IGUI_TARDIS_SonicLock"), worldobjects, M.onSonic, player,
+                          { sq = sq, locks = target.locks })
+    end
+    if target.vehicle then
+        context:addOption(getText("IGUI_TARDIS_SonicCar"), worldobjects, M.onSonic, player,
+                          { sq = sq, locks = {}, vehicle = target.vehicle })
+    end
+end
+
 local function outsideMenu(context, player, worldobjects, sq, test)
     -- Standing next to the shell: offer the door.
     local onShell = TARDIS.Core.exteriorOn(sq) ~= nil
     local canPlace = (not onShell) and TARDIS.Core.canMaterialise(sq)
+    local sonic = TARDIS.Sonic.carriedBy(player) and TARDIS.Sonic.targetAt(sq, worldobjects)
 
-    if not onShell and not canPlace then return false end
+    if not onShell and not canPlace and not sonic then return false end
     if test then return ISWorldObjectContextMenu.setTest() end
+
+    if sonic then sonicMenu(context, player, worldobjects, sq, sonic) end
+    if not onShell and not canPlace then return true end
 
     if onShell then
         context:addOption(getText("IGUI_TARDIS_Enter"), worldobjects, M.onEnter, player)

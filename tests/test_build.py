@@ -182,7 +182,28 @@ function cell:getOrCreateGridSquare(x, y, z)
     SQUARES[k] = SQUARES[k] or newSquare(x, y, z)
     return SQUARES[k]
 end
-function cell:getChunkForGridSquare() return {} end
+-- 8x8 chunks, each keeping the generator positions registered on it, the
+-- way IsoChunk.addGeneratorPos does (a position listed once).
+CHUNKS = {}
+function cell:getChunkForGridSquare(x, y, z)
+    local k = math.floor(x / 8) .. "," .. math.floor(y / 8) .. "," .. z
+    local ch = CHUNKS[k]
+    if not ch then
+        ch = { gens = {} }
+        function ch:addGeneratorPos(gx, gy, gz) self.gens[gx .. "," .. gy .. "," .. gz] = { gx, gy, gz } end
+        CHUNKS[k] = ch
+    end
+    return ch
+end
+function powered(x, y, z)
+    local r = SandboxVars.GeneratorTileRange
+    for _, g in pairs(cell:getChunkForGridSquare(x, y, z).gens) do
+        local dx, dy = g[1] - x, g[2] - y
+        if math.abs(g[3] - z) <= 3 and dx * dx + dy * dy <= r * r then return true end
+    end
+    return false
+end
+SandboxVars = { GeneratorTileRange = 20 }
 LAMPS = {}
 function cell:addLamppost(x, y, z) local l = { x, y, z } table.insert(LAMPS, l) return l end
 function cell:getLamppostPositions() return list(LAMPS) end
@@ -337,6 +358,21 @@ for index in range(1, len(C.Decks) + 1):
             failures.append(f"{deck.id}: {piece} at {o[0]},{o[1]} has no water")
         if use.stove and not any(ob["class"] == "IsoStove" for ob in mine):
             failures.append(f"{deck.id}: {piece} at {o[0]},{o[1]} is not an IsoStove")
+
+# --- power: every deck square is reached by one of the ship's generator points ---------
+# haveElectricity() only asks the chunk's generator list; setHaveElectricity does nothing.
+for rng in (20, 3, 1):
+    G.SandboxVars.GeneratorTileRange = rng
+    for index in range(1, len(C.Decks) + 1):
+        deck = C.Decks[index]
+        B.powerDeck(index, True)
+        lay = B.layoutOf(deck)
+        rx, ry = U.deckOrigin(deck)
+        dark = [(ox, oy) for ox in range(int(lay.w) + 1) for oy in range(int(lay.h) + 1)
+                if not G.powered(rx + ox, ry + oy, int(deck.z))]
+        if dark:
+            failures.append(f"{deck.id}: {len(dark)} squares unpowered at GeneratorTileRange={rng}, e.g. {dark[:3]}")
+G.SandboxVars.GeneratorTileRange = 20
 
 plants = len(list(G.PLANTS.items()))
 print(f"gardens: {plants} plots sown, {len(list(G.ANIMALS.items()))} animals in the stable")

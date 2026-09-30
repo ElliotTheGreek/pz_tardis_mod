@@ -40,7 +40,7 @@ INSTALLED = Path.home() / "Zomboid" / "Workshop" / "TARDIS"
 # game writes that id into ~/Zomboid/Workshop/TARDIS/workshop.txt; copy it
 # here so the repo owns it. Until then an --install keeps whatever id the
 # staged copy already has rather than wiping it.
-WORKSHOP_ID = ""
+WORKSHOP_ID = "3810732908"
 
 VISIBILITY = "public"
 
