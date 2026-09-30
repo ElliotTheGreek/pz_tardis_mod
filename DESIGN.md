@@ -4,32 +4,38 @@ How to change the shape, layout and contents of the interior, and the rules
 the engine imposes on all of it.
 
 Read [The four constraints](#the-four-constraints) before changing the
-layout. Every one of them was learned by breaking the mod, and each explains
-why some obvious-looking design is not available.
+layout, and [INTERIOR.md](INTERIOR.md) for how the art and the decks are made.
+Every constraint was learned by breaking the mod, and each explains why some
+obvious-looking design is not available.
 
 ---
 
 ## The shape of the thing
 
-The interior is **generated at runtime**, not shipped as a map. Nothing here
-was made in TileZed; the mod writes floors, walls and furniture into empty
-world cells the first time a player stands in them.
+The interior is **generated at runtime**, not shipped as a map: the mod writes
+floors, walls and furniture into empty world cells the first time a player
+stands in them. **What it writes is data** -- `TARDIS_Layout.lua`, generated
+from BuildingEd files -- and **every tile is the mod's own**, painted by
+Gemini, modelled by TRELLIS and rendered to the game's iso grid by the scripts
+in `tools/`. [INTERIOR.md](INTERIOR.md) is that pipeline, end to end.
 
 Six decks, one per storey, descending:
 
-| # | Deck | id | z | col | Contents |
-|---|------|----|---|-----|----------|
-| 1 | Console Room | `console` | 5 | 0 | Control console, open floor |
-| 2 | Habitation Deck | `housing` | 4 | 1 | Bunks, lockers, bathrooms |
-| 3 | Stores Deck | `storage` | 3 | 2 | Tools, weapons, ammunition, medicine |
-| 4 | Library Deck | `library` | 2 | 3 | Skill books, magazines, tapes |
-| 5 | Galley Deck | `galley` | 1 | 4 | Kitchens, cold storage, pantry |
-| 6 | Hydroponics Deck | `growing` | 0 | 5 | Crops, seed stores, livestock |
+| # | Deck | id | z | col | Rooms |
+|---|------|----|---|-----|-------|
+| 1 | Console Room | `console` | 5 | 0 | console room, armoury, galley corner |
+| 2 | Habitation Deck | `housing` | 4 | 1 | corridor, two bedrooms, bathroom, dormitory, the Wardrobe, guest room |
+| 3 | Stores Deck | `storage` | 3 | 2 | storeroom, infirmary, workshop |
+| 4 | Library Deck | `library` | 2 | 3 | library, observatory, archive |
+| 5 | Galley Deck | `galley` | 1 | 4 | kitchen, dining room, pantry |
+| 6 | Gardens | `growing` | 0 | 5 | hydroponic garden, stable |
 
-Each deck is a 25×25 **octagonal** hall sitting in a 24-tile ring of stripped
-void. The hall is open: decks are joined through the right-click menu, so
-there is no stairwell or vestibule taking up floor space. A 3×3 **landing**
-is kept clear of furniture, and that is where arrivals are put down.
+Each deck is a set of **rectangular rooms with flat walls** -- no chamfers --
+at most 25 x 25 (`C.RoomSize`), in a 24-tile ring of stripped void. Decks are
+joined through the right-click menu, so there is no stairwell. Each deck's
+layout has a **landing**, kept clear of furniture with the ring round it, and
+that is where arrivals are put down; on the console deck it is in front of
+the police box doors.
 
 **`z` is the storey. `col` is a sideways step.** Deck *n* is one level below
 deck *n−1* **and** `DeckSpacing` (80) tiles east of it. The descent is real;
@@ -101,28 +107,28 @@ The fix is not to argue with the renderer but to remove what it was drawing:
 asserts this directly (`deck.*.nothingOverhead`) because the whole layout
 depends on it.
 
-**If you re-stack the decks, the interior becomes unreadable again.**
+**If you re-stack the decks, the interior becomes unreadable again.** The
+decks are authored in BuildingEd as separate buildings for the same reason:
+one building with a floor per deck is how BuildingEd would hold them, and how
+the game must never build them.
 
 ### 3. Unmapped cells grow wilderness
 
 The engine generates procedural forest in cells with no map data, so an
-untreated interior reads as a tower standing in a wood. Two passes handle it:
-
-- `clearFootprint` strips the deck footprint before anything is placed.
-- `clearSurroundings` strips a `ClearMargin` (24) ring down to *nothing* — no
-  objects, no floor — which renders as black void, the look the Fifth-Wheel
-  RV interior has.
+untreated interior reads as a tower standing in a wood. `clearSurroundings`
+strips a `ClearMargin` (24) ring down to *nothing* — no objects, no floor —
+which renders as black void, the look the Fifth-Wheel RV interior has.
 
 `U.clearSquare` deliberately preserves anything the mod tagged, anything
-lying on the ground, and any sown crop, so both passes are safe to repeat as
+lying on the ground, and any sown crop, so the pass is safe to repeat as
 chunks stream in late.
 
 ### 4. A wrong engine method name is not a quiet failure
 
 Calling a method that does not exist throws out of Java, and the engine dumps
-a full stack trace **per call**. Inside a per-square loop that is 676 dumps
-per deck, which freezes the game hard enough to look like a crash. This cost
-a whole session: `props:UnSet(...)` instead of `props:unset(...)`.
+a full stack trace **per call**. Inside a per-square loop that is hundreds of
+dumps per deck, which freezes the game hard enough to look like a crash. This
+cost a whole session: `props:UnSet(...)` instead of `props:unset(...)`.
 
 Two defences, and both matter:
 
@@ -135,54 +141,63 @@ local join = U.batch("room.addSquare")
 for ... do join(function() room:addSquare(sq) end) end
 ```
 
+`tests/test_build.py` runs the builder against a stub engine and fails on any
+warning, which catches a typo in our own Lua; only `pzapi.py` settles whether
+the engine has the method.
+
 ---
 
 ## Changing the design
 
-### Furnishing a deck
+### Moving or adding furniture
 
-**Draw the layout before believing it.** `tools/tileview.py` composites sprites
-over a floor tile, and a few squares of a run laid out that way shows what a
-deck will look like without a game round trip -- an appliance run with a second
-row of counters in front of it turns out to hide everything behind it, which is
-obvious in a picture and invisible in the code.
+**The decks are authored in BuildingEd**, in `design/buildinged/TARDIS_*.tbx`,
+and read at runtime out of `TARDIS_Layout.lua`. To move a bookcase, open the
+map editor, not the Lua:
 
-Each deck has one function in `TARDIS_Build.lua`, keyed by `deck.id`:
+1. Edit the deck in BuildingEd (or its spec in `tools/gen_tardis_decks.py`,
+   while the file is still a draft the generator owns).
+2. `python tools/gen_tardis_lua.py` -- the layout the game builds from.
+3. `python tests/test_layout.py` prints every deck's plan and fails on a
+   fitting whose tile is not ours, a container that is not marked one (or the
+   other way round), a container nothing stocks, or a blocked landing.
 
-```lua
-furnish.library = function(deck)
-    local books = skillBookList()
-    for i = 1, 6 do
-        line(deck, C.Sprites.bookShelf.S, 2 + (i - 1) * 2, 2, 0, 1, 20,
-             { loot = books, amount = 12, tag = "books" })
-    end
-end
-```
+A new *kind* of furniture is a new entry at the **end** of
+`tools/tardis_objects.py`, then a concept, a mesh and a render
+([INTERIOR.md](INTERIOR.md) section 4).
 
-`line(deck, sprite, ox, oy, dx, dy, count, opts)` places a run of objects from
-an offset inside the deck. `opts` takes:
+**Draw the layout before believing it.** `gen_tardis_decks.py` renders every
+deck from the real tiles into `design/art/interior/decks/`: a run of
+appliances with a second rank of counters in front of it hides everything
+behind it, which is obvious in a picture and invisible in the data.
 
-| key | meaning |
-|-----|---------|
-| `loot` | a list from `C.Loot`; makes the object a container and stocks it |
-| `amount` | items per container |
-| `tag` | mod-data tag — **required for anything that should survive a rebuild** |
+**Tag every object you place.** The builder tags each object with its piece's
+name; `U.clearSquare` keeps tagged objects and destroys untagged ones, and
+tags drive behaviour: a piece the layout's `uses` marks `water` is refilled.
 
-The armoury is the worked example of a *packed* container rather than a seeded
-one. `ARMOURY` in `TARDIS_Build.lua` is a list of crate specs — a loot list, a
-number of copies of it, and a tag — and `armouryBay(deck, spots, specs)` puts
-one crate on each offset it is given. The console room gets the six core
-crates; the stores deck gets those plus four heavy ones.
+### What goes in a container
 
-**Capacity is a weight, and it binds the player, not the mod.** A military
-crate holds 50, a locker 40, a set of metal shelves 30. `ItemContainer.AddItem`
-does **no capacity check at all** — verified by disassembling it — so
-everything the mod puts in goes in, however much it is. What an over-filled
+Stock is by **piece and deck**: `C.Stock[deck][piece]`, then
+`C.Stock.any[piece]`, in `TARDIS_Config.lua`. `loot` names a `C.Loot` list
+(`books` is every volume of every skill book), `amount` is how many picks,
+and `cycle` hands consecutive containers of one piece the next list in turn,
+so a storeroom's shelves alternate tools, medicine and linen.
+
+Three things are packed rather than seeded, by name in `TARDIS_Build.lua`:
+
+- **the armouries** (`ARMOURY`): the console deck's six gun cabinets and four
+  trunks and the stores deck's eleven trunks, each a loot list times a number
+  of copies, handed out in layout order;
+- **the hold**: `C.ConsoleKit` packed across the console and the six roundel
+  lockers, once in the life of a world;
+- **the sonic case**: `C.SonicCount` screwdrivers.
+
+**Capacity is a weight, and it binds the player, not the mod.**
+`ItemContainer.AddItem` does **no capacity check at all** -- verified by
+disassembling it -- so everything the mod puts in goes in. What an over-filled
 container costs is the player: they can take out of it and cannot put anything
-back until it is under its capacity again. So the loot lists in `C.Loot` are
-split by *what a crate is for* rather than by what an item is, each carries the
-weight of one copy of it in a comment, and `copies` is chosen so no crate ends
-up over about 48 and unusable as storage:
+back. So each armoury list carries the weight of one copy in a comment, and
+`copies` is chosen so nothing ends up over about 48 of a 50:
 
 | crate | list | copies | weight |
 |---|---|---|---|
@@ -197,25 +212,13 @@ up over about 48 and unusable as storage:
 | 5.56 ×2 | `ammo556` | 8 | 45.9 each |
 | katanas | `katanas` | 4 | 8.0 |
 
-Cartons are what forces most of that: one carton of .44 weighs twelve, a
-quarter of a crate on its own, which is why the shelves and lockers get
-`C.Loot.gunAmmo` — everything *except* the cartons — and the cartons get
-crates of their own.
+The two 5.56 trunks are the M16's: `Base.AssaultRifle` and `Base.JS14_Rifle`
+both feed on it, and eight copies of `C.Loot.ammo556` is a little under two
+thousand rounds a trunk.
 
-The two 5.56 crates are the M16's, and they are the reason the calibre has its
-own list. `Base.AssaultRifle` and `Base.JS14_Rifle` both feed on
-`base:bullets_556`; eight copies of `C.Loot.ammo556` is eight cartons, eight
-boxes, loose rounds and magazines per crate, a little under two thousand
-rounds each.
-
-**Tag everything you place.** `U.clearSquare` keeps tagged objects and
-destroys untagged ones, so an untagged shelf is wiped on the next rebuild.
-Tags also drive behaviour: `sink`, `shower` and `toilet` are refilled with
-water every ten in-game minutes.
-
-Offsets run `0..25` from the deck's north-west corner. `C.Landing` and its
-clearance ring are refused by every placement helper, so nothing can be put
-down where a player arrives — you do not have to route around it by hand.
+A container's size comes from its tile (`ContainerCapacity`, set per piece in
+`gen_tardis_pack.py`, `CAPACITY`): a bookcase 30, a gun cabinet or a trunk 50,
+a hold locker 100.
 
 ### Loot lists
 
@@ -229,118 +232,80 @@ python tools/pzcatalog.py check Base.Pills,Base.Hammer
 
 `U.stock` keeps a **rolling cursor per list**, so consecutive containers
 continue through it instead of all starting at the top. This is why the
-library covers all ninety skill books rather than repeating the first twelve
-a hundred and twenty times. `tests/test_stock.py` guards it.
+library covers all ninety skill books rather than repeating the first eight a
+hundred times over. `tests/test_stock.py` guards it.
 
-Long lists spread further than short ones. If you want fuller coverage, make
-the list longer or the containers more numerous — not `amount` bigger.
+### Tiles
 
-### Choosing sprites
+Every sprite aboard is one of the mod's own, `tardis_interior_01_*` (walls,
+floors, doors) and `tardis_interior_02_*` (furniture), from
+`media/texturepacks/tardis_interior.pack` and the tiledef
+`media/tardis_interior.tiles`, both named in `mod.info`
+(`pack=tardis_interior`, `tiledef=tardis_interior 1963`). The one vanilla tile
+is the soil under the crop beds. A sprite the game cannot find fails
+**silently**, leaving an empty square and no error anywhere, so
+`tests/test_assets.py` checks that the pack, the tiledef and `mod.info` agree,
+and every sprite in the Lua against them.
 
-Sprite names come from the installed build; a wrong one fails **silently**,
-leaving an empty square and no error anywhere.
+**Properties are copied from a vanilla tile doing the same job**
+(`gen_tardis_pack.py`): walls from `industry_01`, floors from
+`floors_interior_tilesandwood_01`, doors from `fixtures_doors_01`, beds from
+`furniture_bedding_01`, the range from a real oven, the fridge from a real
+fridge, lockers and shelves from `furniture_storage_02`. What a vanilla tile
+says is what the engine is known to act on. Two are never copied:
+`lightswitch` (it turns a sprite into an `IsoLightSwitch` on the next load)
+and `CustomItem`.
 
-```sh
-python tools/pzcatalog.py build                       # once, after a game update
-python tools/pzcatalog.py sprites container fridge
-python tools/pzcatalog.py sprites name furniture_bedding
-```
+**A sprite is not the object the engine builds from it.** An `IsoObject`
+wearing an oven's picture cooks nothing; the range is built as an `IsoStove`.
+A runtime container has no `ItemContainer` until
+`createContainersFromSpriteProperties` is called, and vanilla rolls its own
+loot into it on first look unless it is `setExplored`. A sink's `waterAmount`
+property is not a supply: each water fitting gets a fluid store of its own.
 
-Useful properties: `container` (shelves, crate, locker, fridge, stove,
-counter…), `bed`, `lightswitch`, `waterAmount`, `solidfloor`, `wall`.
-
-**`IsTableTop` sprites are drawn standing on something.** A lamp, a radio, a
-microwave, a counter basin: the art is drawn already raised to counter height,
-so it lines up on a counter and *floats* anywhere else. Pulled out of
-`Tiles2x.pack`, `fixtures_sinks_01_0` is 35×20 of art sitting entirely above
-the floor diamond — a basin, not a sink. Left on bare floor it hangs over the
-square behind and reads as a sink sunk into that square's floor, which is
-exactly how it looked in game.
-
-`U.addObject` corrects it: `renderYOffset = Surface − whatever it stands on`,
-so a basin on a counter gets 0 and one on bare floor gets +34. It applies to
-everything placed and everything found already placed, so a rebuild repairs an
-old deck.
-
-**The sign is the opposite of the game's own code.**
-`ISMoveableSpriteProps:placeMoveableInternal` computes `under − Surface`, which
-is right for a counter and moves a floor-placed one further up — that was tried
-in 1.9.1 and the sinks disappeared entirely. The game's floor-placement path
-for a table-top item is code nothing exercises: a player puts a basin on a
-counter. Render the sprite against a floor tile and look at it; that is the
-only evidence that settles which way is down.
-
-**Prefer the right sprite over an offset.** `C.Sprites.sink` is a pedestal sink
-that stands on the floor by itself (`fixtures_sinks_01_28/12/13/29`), for a wet
-block; `C.Sprites.sinkBasin` is the counter basin, and the galley puts a
-counter down first and the basin on top of it. Same for the microwave.
-`python tools/pzcatalog.py sprites name fixtures_sinks` lists the set;
-`IsTableTop`, `IsSurfaceOffset` and `Surface` are the flags that matter, and
-`python tools/tileview.py --where <sprite>` says whether the art stands on the
-floor at all.
-
-Wall tilesets follow a pattern: index 0 is the **west** face, 1 the **north**
-face, 2 the corner post. Multi-tile furniture is consecutive (a bed is
-`furniture_bedding_01_8` head and `_9` foot).
-
-`tests/test_assets.py` checks every sprite name and item id in the Lua
-against the catalogue, so a typo fails before the game ever runs.
+**Where you sit is not a tile property.** Build 42 reads seat positions from
+`seating.txt`, and only from a mod's `common/media`. `gen_tardis_pack.py`
+writes `TARDIS/common/media/seating.txt`, each of our seats and beds copying
+the vanilla entry for the tile it stands in for.
 
 ### Changing the room shape
 
-`C.Shape` is one of `"rect"`, `"octagon"` (default) or `"hexagon"`, with
-`C.Chamfer` controlling how deep the corners are cut.
+Rooms are rectangles in the deck specs (or whatever you draw in BuildingEd).
+**Project Zomboid has no diagonal wall sprites** -- walls only sit on the north
+or west edge of a square -- and the old octagonal halls were a stepped chamfer
+standing in for one. The redesign gave that up for square rooms with flat
+walls, which is what the author asked for and what the engine draws cleanly.
 
-**Project Zomboid has no diagonal wall sprites.** Walls only ever sit on the
-north or west edge of a square, so a smooth hexagon or circle is not
-available at any size. What *is* available is a stepped chamfer — cut the
-corners off the square and let the wall follow the steps — which at deck scale
-and the game's camera angle reads clearly as an octagon.
-
-Walls are **derived from the floor plan**, not hard-coded: `buildWalls` walks
-every in-shape square and puts a wall wherever its neighbour is outside. So a
-new shape is a new `C.inShape` branch and nothing else. Furnishing follows
-too — `line()` skips out-of-shape squares, and `wallRing(deck, inset)` returns
-the band of squares just inside the wall along with the direction each should
-face, so shelves hug all eight walls with no hand-placed coordinates.
-
-`tests/test_layout.py` prints the plan as ASCII and asserts the landing,
-alcove doorway and console are all inside it.
+Walls are **derived from the rooms**, by BuildingEd's rule, in
+`gen_tardis_lua.py`: a wall on every edge between two different rooms or a
+room and nothing, in the style of the room on the square it stands on. A wall
+standing outside every room still gets a floor under it: a wall on a midair
+square behaves badly.
 
 ### Multi-tile furniture
 
-A bed, wardrobe or desk covers several squares, and **which half goes where is
-not guessable** — it comes from the tileset's `SpriteGridPos`. Declare pieces
-in `C.Pieces` as `{sprite, dx, dy}`:
+A bed, a desk or the console covers several squares, and **which part goes
+where** is its tiles' `SpriteGridPos`, written by `gen_tardis_pack.py` from the
+render (`tardis_interior_02.json`). `tests/test_layout.py` checks every square
+of every multi-square piece against it and that all its squares face the same
+way.
 
-```lua
-bedS = { { "furniture_bedding_01_9", 0, 0 }, { "furniture_bedding_01_8", 0, 1 } },
-```
-
-then place with `place(deck, "bedS", ox, oy, "bed")`, which refuses if any
-square it needs falls outside the room.
-
-Getting these backwards is what made the bunks look mismatched: every bed had
-its foot laid where its head belonged. `tests/test_layout.py` now checks every
-declared offset against `SpriteGridPos` and that all halves face the same way.
+Every square of a multi-square container is a container of its own, as
+vanilla's two-square wardrobes are: the console is four.
 
 ### Changing a deck's size
 
-`C.RoomSize` (25) is the outer footprint including walls; `C.RoomOffset` (16)
-keeps it off the cell edge. If you change either:
-
-- Keep `C.DeckSpacing` comfortably larger than `RoomSize + 2 * ClearMargin`,
-  or neighbouring decks come into view.
-- `C.Alcove` offsets are relative to the room origin and must stay inside it.
-- Furnishing offsets are absolute within the deck and will need revisiting.
-- Bump `C.BuildRev`.
+A deck is at most `C.RoomSize` (25) squares a side; `C.RoomOffset` (16) keeps
+it off the cell edge. `tests/test_layout.py` fails a deck that is larger. Keep
+`C.DeckSpacing` comfortably larger than `RoomSize + 2 * ClearMargin`, or
+neighbouring decks come into view.
 
 ### Adding a deck
 
 1. Add an entry to `C.Decks` with a fresh `id`, the next `z` down and the next
    `col` across. `C.TopZ` is the highest z in use.
-2. Add a `furnish.<id>` function.
-3. Bump `C.BuildRev`.
+2. Add its spec to `DECKS` and `ORDER` in `tools/gen_tardis_decks.py`, and run
+   the loop.
 
 z 0 is the ground, so six decks is the limit of a strictly descending stack.
 To go further, either start higher (`z` up to 31 — the engine's ceiling, per
@@ -349,62 +314,35 @@ alone, which the layout already tolerates.
 
 ### The console is the hold
 
-The console in the middle of the control room is a world item, not a tile
-object, so it cannot carry a container the way a shelf does — a shelf's
-container comes from its sprite properties, and the console has no sprite.
+The console in the middle of the console room is a **tile**, not a world item:
+the hexagonal console and its time rotor, a 2 x 2 piece whose four squares are
+containers of 100 each. With the six roundel lockers along the west wall it
+is the ship's hold, and `C.ConsoleKit` -- a packing list: explicit counts, not
+a spread -- is packed across them, the console first, the first time the deck
+is built.
 
-What it can be instead is a **container item**. `ISInventoryPage` walks the
-world objects on the squares around the player and gives its own button to
-every item whose category is `Container`, which is how a bag on the floor is
-lootable. So `TARDISConsoleUnit` is declared `ItemType = base:container` with
-`Capacity = 500`, and the model opens like a crate.
-
-Two things follow from that.
-
-**It is a different item id from the console every world before revision 11
-had.** An item saved by one class and reloaded as another reads a section of
-the save that was never written, and the old console was a plain
-`InventoryItem`. `C.LegacyConsoleItem` stays declared in `tardis.txt` so an
-existing world can still resolve it, and `furnish.console` lifts it off the
-square with `sq:removeWorldObject` and puts the container down in its place.
-
-**It is stocked exactly once**, when it is first placed, from `C.ConsoleKit`.
-That is a packing list rather than a loot list — explicit counts, not a
-spread — and `U.stockKit` reads the container back afterwards and logs
-anything that did not fit.
+Before 2.0.0 the console was a *world item* that opened like a crate. The
+refit of an old console room lifts that item out and hands its contents to the
+new hold; the two old item ids stay declared in `tardis.txt` so an old save
+can still load them long enough for that.
 
 ### A container cannot be made bigger than the engine allows
 
-This is the constraint the hold ran into, and it is worth stating plainly
-because nothing about it is visible from the script side. Two ceilings, both
-in `ItemContainer.getCapacity()`:
+Two ceilings, both in `ItemContainer.getCapacity()`, and nothing about them is
+visible from the script side:
 
 - a container that belongs to an **item** returns `min(capacity, 50)`, and
   `InventoryContainer.getCapacity()` then clamps that again to
   **50 − the item's own weight**;
 - a container that belongs to a world **object** returns `min(capacity, 100)`.
 
-So `Capacity = 500` is not a bigger container, it is a 50. On an item weighing
-80 it is **−30**: a hold everything can come out of and nothing can go into,
-which is exactly how it read in game. The console item therefore weighs 1 and
-carries 49.
-
-`AddItems` does not check any of this, so the kit went in regardless — the cap
-is enforced when a *player* moves something in, not when the mod does.
-
-**The way to a bigger hold is more containers, not a bigger one.**
-`C.ConsoleHold` is a ring of six crates on the rug around the console, each
-raised from the crate sprite's 50 to the object ceiling of 100 with
-`setCapacity`, named "TARDIS Hold" so the loot panel does not just say
-*Crate*. The four squares orthogonally adjacent to the console are left clear
-so it can still be walked up to.
-
-`spillHold` then moves the heavy end of the console's contents out into the
-ring, heaviest first, until the console is inside its 49 — which leaves the
-console holding what you would want on the way out (screwdrivers, pills,
-bandages, a pistol) and the cartons and tins in the crates. It runs on every
-build, not only the first, so a world that already had the whole kit piled
-into the console is put right the next time the deck is built.
+So the old console item's `Capacity = 500` was not a bigger container, it was
+a 50 -- and on an item weighing 80 it was **−30**: a hold everything could come
+out of and nothing could go into. **The way to a bigger hold is more
+containers, not a bigger one** -- and tiles, not items. The hold now is ten
+world-object containers at the ceiling of 100 (the console's four squares and
+six lockers), their capacity and their name ("TARDIS Console", "TARDIS Hold")
+set in the tile definitions.
 
 ### The sonic screwdriver
 
@@ -423,7 +361,7 @@ Everything tunable is in `TARDIS_Config.lua`:
 | `C.SonicInterval` | ticks between sweeps when the carrier is standing still |
 | `C.SonicHotwire` | bypass the ignition on vehicles in reach |
 | `C.SonicJumpStart` | charge a flat battery on vehicles in reach |
-| `C.SonicBox`, `C.SonicCount` | where the case sits in the console room and how many are in it |
+| `C.SonicCount` | how many are in the sonic case beside the police box doors |
 
 Three things decided the shape of it.
 
@@ -488,15 +426,11 @@ per sweep, and each does its reading and its writing in the same batched call.
 The batches cover the reads that *find* things — the door accessor, the
 special-object list, the vehicle accessor — and not only the writes, because
 `U.try` in a loop keeps calling after it warns and the engine keeps dumping a
-stack trace each time. That is constraint 4 applied literally: a wrong method name in a loop
-this size is hundreds of stack dumps and a frozen game, and this loop is the
-largest per-square pass in the mod after deck construction.
+stack trace each time. That is constraint 4 applied literally.
 
 **Nothing is ever re-locked.** A lock the field has opened stays open once the
-screwdriver is put down. Reverting would mean remembering every object ever
-touched and re-locking doors behind a player who walked through them, which is
-worse play and much more state. The rule is that the field decides which locks
-give, not which doors stay shut afterwards.
+screwdriver is put down. The rule is that the field decides which locks give,
+not which doors stay shut afterwards.
 
 A permanently-locked window (`isPermaLocked`) is left alone deliberately: that
 is a map saying this window never opens, not a lock.
@@ -505,17 +439,21 @@ is a map saying this window never opens, not a lock.
 
 **A rebuild must never touch what is already in a container.** Once a shelf
 exists it is the player's: what they eat stays eaten, what they take stays
-taken, and what they put back stays where they put it.
+taken, and what they put back stays where they put it. A container is stocked
+once, ever: on the pass that makes it. Without that gate a rebuild does not
+merely refill a shelf — it stocks it *again*, piling a second helping on top
+of the first, so loot multiplies with every revision.
 
-`U.addContainer` returns a second value saying whether it created the
-container just now, and `line()` stocks only when it did. Without that gate a
-rebuild does not merely refill a shelf — it stocks it *again*, piling a second
-helping on top of the first, so loot multiplies with every revision bump.
+And a rebuild that takes something away -- a fitting the layout no longer
+has, or a whole old deck on the refit -- **hands its contents back**: into the
+deck's new containers where there is room, onto the floor round the landing
+where there is not. The live items move, not their ids, so a magazine keeps
+its rounds. A container that took salvage is not stocked on top of it.
 
 The corollary is that **changing a loot list does not change any deck that
 already exists.** New containers get the new list; old ones keep what they
-have. That is correct for play and inconvenient for design, hence the two
-escape hatches below.
+have. That is correct for play and inconvenient for design, hence the escape
+hatch below.
 
 ### Rebuilding while designing
 
@@ -525,27 +463,26 @@ TARDIS_Rebuild()      -- from the debug console, standing on the deck
 
 Tears the deck you are standing on back to bare ground — containers and
 contents included — and regenerates it fully stocked. Only the current deck
-can be rebuilt, because only its chunks are loaded.
-
-`C.DevRestock = true` does the same thing globally for every rebuild. It is
-off by default and should stay off outside design work.
-
-For a wholesale change, a **fresh world** is still the cleanest way to see the
-interior as a new player would.
+can be rebuilt, because only its chunks are loaded. For a wholesale change, a
+**fresh world** is still the cleanest way to see the interior as a new player
+would.
 
 ### Build revisions and migrations
 
-`C.BuildRev` is stamped into each deck as it is built. Raising it makes every
-deck rebuild the next time a player stands on it — lazily, on arrival, so a
-deck nobody visits stays as it was. Rebuilds repair structure (floors, walls,
-lighting, the void margin) and preserve tagged furniture, container contents,
-dropped items and crops.
+A deck is stamped with `C.BuildRev` and the layout's `L.rev` as it is built.
+`L.rev` is a hash of everything placed, so any change to a deck's layout makes
+that deck update itself the next time a player stands on it -- lazily, on
+arrival, so a deck nobody visits stays as it was. An update places what is
+missing, takes away what we placed and the layout no longer has (contents
+handed back), and never touches a container that is still wanted.
 
-Bump it when **generation** changes. It will not restock anything.
+Bump `C.BuildRev` when the **builder** changes in a way every deck needs.
 
-**Moving a deck is not a rebuild — it is a migration.** Its old geometry stays
-where it was and its container contents do not travel. `purgeLegacyStack()`
-is the worked example: it clears the levels left under the console room when
+**Moving geometry is a migration, not a rebuild.** Revision 16 is the worked
+example: every deck built before it is an old octagonal hall of vanilla
+furniture, and `refitLegacy` clears such a deck whole, once, before the new
+layout goes down ([INTERIOR.md](INTERIOR.md) section 6). `purgeLegacyStack()`
+is the older example: it clears the levels left under the console room when
 the decks stopped being stacked.
 
 ### Travel and the map
@@ -564,14 +501,15 @@ depicts.
 
 ## Assets
 
-The police box and console are **world models** (`.x` meshes plus textures),
-not tile sprites — a custom tile would need a TileZed-packed texture pack.
-Everything is generated by script; no binary asset is hand-authored.
+The interior is **tiles**: our own texture pack, made by the pipeline in
+[INTERIOR.md](INTERIOR.md) from Gemini art and TRELLIS meshes. The police box
+shell and the sonic screwdriver are **world models** and icons, generated by
+script:
 
 ```sh
 python tools/gen_texture.py TARDIS/42     # police box texture + inventory icon
 python tools/gen_model.py   TARDIS/42     # police box mesh
-python tools/gen_console.py TARDIS/42     # console texture + mesh
+python tools/gen_console.py TARDIS/42     # the old console item's mesh, kept for old saves
 python tools/gen_sonic.py   TARDIS/42     # sonic screwdriver inventory icon
 ```
 
@@ -580,25 +518,16 @@ one shows as a blank square in the inventory and reports nothing anywhere.
 `tests/test_assets.py` checks every icon a mod item names against the files
 on disk, along with every `TARDIS.*` id the Lua refers to.
 
-Check the result **without launching the game**:
+Check a model **without launching the game**:
 
 ```sh
 python tools/preview_model.py TARDIS/42/media/models_X/TARDIS_PoliceBox.x \
        TARDIS/42/media/textures/TARDIS_PoliceBox.png /tmp/preview.png
 ```
 
-`tools/preview_model.py` is a small software renderer — mesh parser,
-z-buffer, per-pixel texture sampling — that draws the model at roughly the
-game's camera angle. Use it. It caught the geometry and signage before the
-game was ever involved.
-
-Two things to know about the meshes:
-
 - **Y is up.** Project Zomboid world models are Y-up; authoring Z-up lays the
-  box on its side. `MeshBuilder(up_axis=...)` handles the swap, and
-  `preview_model.py` swaps back so previews stay upright.
+  box on its side.
 - **1 unit is 1 tile**, with `scale = 1.0` in `media/scripts/tardis.txt`.
-  That is the number to change if the shell reads too large or small.
 
 ---
 
@@ -606,9 +535,10 @@ Two things to know about the meshes:
 
 ```sh
 python tools/luacheck.py TARDIS/42/media/lua   # parses every file
-python tests/test_assets.py                    # sprite and item ids resolve
+python tests/test_assets.py                    # sprites, items, icons, pack and tiledef
 python tests/test_stock.py                     # loot spreads across its list
-python tests/test_layout.py                    # floor plan + furniture offsets
+python tests/test_layout.py                    # every deck, printed and checked
+python tests/test_build.py                     # the builder, run against a stub engine
 sh tools/deploy.sh                             # copy into Zomboid/mods
 ```
 
@@ -623,14 +553,15 @@ sh tools/readtest.sh
 
 The self-test is a step machine, not a straight function, because most steps
 have to wait for the world. It materialises the shell, boards it, then builds
-and inspects every deck in turn: floors, walls, landing, container stocking,
-nothing overhead, void margin, water, crops, the repulsion field, exit and
-bookmarks.
+and inspects every deck in turn -- every layout object read back off its
+square, floors, the landing, container stocking, nothing overhead, void
+margin -- then the hold, the sonic case, the galley range and sink, water,
+crops, the repulsion field, exit and bookmarks.
 
 **Lua version note.** The game runs Kahlua, a Lua 5.1 dialect where `unpack`
-is a global. `tools/luacheck.py` and `tests/test_stock.py` use Lua 5.5, which
-moved it to `table.unpack`; the test harness stubs it back. Mod code should
-use the 5.1 spelling.
+is a global and there is no `goto`. `tools/luacheck.py` and the tests use Lua
+5.5, which accepts both; the harness stubs `unpack` back. Mod code uses the
+5.1 spelling.
 
 ---
 
@@ -638,17 +569,18 @@ use the 5.1 spelling.
 
 | File | Holds |
 |------|-------|
-| `TARDIS_Config.lua` | All layout constants, sprites, loot lists, crops. Start here. |
+| `TARDIS_Config.lua` | Decks, loot lists, stock rules, crops, the kit. Start here. |
+| `TARDIS_Layout.lua` | Every deck as data -- GENERATED by `tools/gen_tardis_lua.py`, do not edit |
 | `TARDIS_Util.lua` | Safe engine wrappers, state, coordinates, clearing, stocking |
-| `TARDIS_Build.lua` | Deck construction and furnishing |
+| `TARDIS_Build.lua` | Places the layout: floors, walls, doors, fittings, stock, water, lamps, the refit |
 | `TARDIS_Core.lua` | Shell, doors, arrival, water, repulsion field |
 | `TARDIS_Travel.lua` | Bookmarks, landing search, flight console, map markers |
 | `TARDIS_Sonic.lua` | The sonic screwdriver: the lock-opening sweep |
 | `TARDIS_Menu.lua` | Right-click menus |
 | `TARDIS_SelfTest.lua` | In-game step machine |
 
-Almost every design change is a change to `TARDIS_Config.lua` plus one
-`furnish` function.
+Almost every design change is an edit in BuildingEd (or a deck spec) plus
+`gen_tardis_lua.py`, and perhaps a stock rule in `TARDIS_Config.lua`.
 
 ---
 
@@ -657,9 +589,12 @@ Almost every design change is a change to `TARDIS_Config.lua` plus one
 - Verify an engine method with `tools/pzapi.py` before calling it.
 - Wrap anything repeated per-square in `U.batch`.
 - Tag every object you place, or a rebuild eats it.
-- Never build where no player is standing.
+- Move furniture in BuildingEd, never in the Lua; regenerate the layout.
+- Look at the picture: the room preview, the furniture sheet, the deck renders.
+- Never build, or un-build, where no player is standing.
 - Never put a deck above another deck.
-- Bump `C.BuildRev` when generation changes; write a migration when geometry
+- Never throw away what a player might keep: hand it back.
+- Bump `C.BuildRev` when the builder changes; write a migration when geometry
   *moves*.
-- Run the three static checks before deploying — they are seconds, and a
-  game round-trip is minutes.
+- Run the static checks before deploying — they are seconds, and a game
+  round-trip is minutes.

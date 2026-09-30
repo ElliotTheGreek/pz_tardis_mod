@@ -1,0 +1,33 @@
+A working TARDIS for Project Zomboid Build 42 (single player). Materialise the police box on any free tile, step inside, and find it bigger on the inside: six decks of rooms in the style of the real TARDIS sets, every tile and every piece of furniture drawn for this mod.
+
+[h2]BIGGER ON THE INSIDE[/h2]
+[list]
+[*][b]The Console Room[/b] -- white roundel walls, the hexagonal console with its glowing time rotor, the police box doors seen from inside, the scanner, and the Doctor's corner of books, a Chesterfield and leather wingbacks. Through two doors: an armoury and a galley corner.
+[*][b]Habitation Deck[/b] -- bedrooms, a dormitory, a Victorian bathroom with roll-top baths, and [b]the Wardrobe[/b]: racks of long coats and striped scarves round a spiral stair.
+[*][b]Stores Deck[/b] -- a storeroom of tools, linen and medicine, an infirmary and a workshop.
+[*][b]Library Deck[/b] -- walnut stacks holding every volume of every skill book in the game, an observatory with telescopes and a celestial globe, and an archive of records and tapes.
+[*][b]Galley Deck[/b] -- a kitchen with working ranges and running water, a dining room and a pantry.
+[*][b]Gardens[/b] -- crop beds already sown under grow lamps, seed cabinets, a potting bench and a stable of livestock.
+[/list]
+Sit in the chairs, sleep in the beds, cook on the ranges. The sinks, basins, baths and troughs never run dry.
+
+[h2]THE HOLD[/h2]
+The console itself and six roundel lockers make up the ship's hold, packed with its kit: an infirmary's worth of medicine, tins and dry stores, sidearms, and an M16 with sixteen hundred rounds. The armouries hold every firearm in the game, every magazine and every calibre.
+
+[h2]FLY IT[/h2]
+Right-click anywhere inside for the TARDIS menu. Open the flight console, click anywhere on the world map (the map is fully revealed while you steer) or pick a saved bookmark, and the ship lands on the nearest open ground when you next step outside. Move between decks from the same menu.
+
+[h2]THE SONIC SCREWDRIVER[/h2]
+Three of them wait in a glass case beside the doors. Carry one and every lock within fifteen tiles opens as you walk past: house doors, gates, padlocks, keypads, window latches, car doors and boots. Cars in reach are hotwired and get a charge in a flat battery. It does not fill the tank.
+
+[h2]AND[/h2]
+[list]
+[*]Nothing dead gets within ten tiles of the box -- they are pushed back, not killed.
+[*]The decks float in black void, the way a TARDIS interior should.
+[*]The ship is lived in: nothing restocks behind you, and what you store stays stored.
+[/list]
+
+[h2]HOW TO USE[/h2]
+Right-click a free tile: Materialise the TARDIS here. Right-click the box: Enter the TARDIS. Inside, right-click anywhere for the menu.
+
+Single player. Build 42 only. An unofficial fan-made mod, not affiliated with or endorsed by the BBC.

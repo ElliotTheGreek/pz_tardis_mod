@@ -3,23 +3,30 @@
     The interior is generated at runtime in otherwise empty cells rather than
     shipped as a map, so the mod needs no TileZed-built lots. Decks are built
     lazily: the console room goes up on the first entry, and each deck below
-    the first time anyone walks down to it.
+    the first time anyone arrives on it.
 
-    A deck is a 25x25 hall with a walled stair core on its east side. Each
-    deck sits one z level below the last and one step sideways, so no deck is
-    ever directly above another. That sidestep is deliberate: the engine draws
-    every level above the player and only hides what is overhead when it
-    believes you are inside a building, which requires room metadata baked
-    into a map file that runtime squares cannot have. With nothing overhead
-    there is nothing to hide, and the descent through z stays real.
+    **What a deck is made of is data, not code.** Every wall, door, floor and
+    fitting comes from TARDIS_Layout.lua, which tools/gen_tardis_lua.py
+    generates from the BuildingEd files in design/buildinged/, and every
+    sprite is one of the mod's own tiles (media/texturepacks/tardis_interior
+    .pack). To move a bookcase, open BuildingEd, not this file (INTERIOR.md).
+    This file places what it is given, stocks it, and keeps it lived in.
+
+    Each deck sits one z level below the last and one step sideways, so no
+    deck is ever directly above another. That sidestep is deliberate: the
+    engine draws every level above the player and only hides what is overhead
+    when it believes you are inside a building, which requires room metadata
+    baked into a map file that runtime squares cannot have.
 ]]
 
 require "TARDIS/TARDIS_Config"
 require "TARDIS/TARDIS_Util"
+require "TARDIS/TARDIS_Layout"
 
 TARDIS = TARDIS or {}
 local C = TARDIS.Config
 local U = TARDIS.Util
+local L = TARDIS.Layout
 
 local B = {}
 TARDIS.Build = B
@@ -37,60 +44,49 @@ local function at(deck, ox, oy)
     return rx + ox, ry + oy
 end
 
---- Where a player arriving on a deck is put down. The square and the ring
---- around it are kept clear of furniture by every placement helper.
+--- A deck's generated layout.
+local function layoutOf(deck)
+    return deck and L.decks[deck.id]
+end
+B.layoutOf = layoutOf
+
+--- Where a player arriving on a deck is put down: the layout's landing, in
+--- front of the police box doors on the console deck. gen_tardis_decks.py
+--- refuses any fitting on it or the ring round it.
 function B.arrivalSpot(deck)
-    local x, y = at(deck, C.Landing.x, C.Landing.y)
+    local lay = layoutOf(deck)
+    local x, y = at(deck, lay.landing.x, lay.landing.y)
     return x, y, deck.z
+end
+
+--- True when a deck offset is inside one of the deck's rooms.
+function B.inRoom(deck, ox, oy)
+    local lay = layoutOf(deck)
+    local row = lay and lay.grid[oy + 1]
+    return row ~= nil and (row[ox + 1] or 0) > 0
 end
 
 ---------------------------------------------------------------------------
 -- Clearing the site
 ---------------------------------------------------------------------------
 --- The interior cells are unmapped, so the engine grows procedural
---- wilderness there. Left alone the ship reads as a tower in a forest, so the
---- footprint is stripped before building and a wide margin around it is
---- stripped to nothing at all, which renders as black void.
+--- wilderness there. Left alone the ship reads as a tower in a forest, so a
+--- wide margin around each deck is stripped to nothing at all, which renders
+--- as black void.
 ---
 --- Safe to repeat: U.clearSquare keeps anything the mod placed and anything
---- lying on the ground, and sown plots are stepped over so a rebuild never
---- destroys a crop the farming system still has a record of.
-local function clearFootprint(deck)
-    local cleared = 0
-    local farming = SFarmingSystem and SFarmingSystem.instance
-    for ox = 0, C.RoomSize do
-        for oy = 0, C.RoomSize do
-            local x, y = at(deck, ox, oy)
-            local sq = U.square(x, y, deck.z, false)
-            if sq then
-                local hasPlant = false
-                if farming then
-                    hasPlant = U.try("plantHere", function()
-                        return farming:getLuaObjectOnSquare(sq)
-                    end) ~= nil
-                end
-                if not hasPlant then
-                    cleared = cleared + U.clearSquare(sq, true)
-                end
-            end
-        end
-    end
-    U.debug("cleared %d objects from the %s footprint", cleared, deck.id)
-end
-
---- Strips the ring around a deck, on its own level and on the ground below
---- it, where the wilderness actually grows.
+--- lying on the ground.
 local function clearSurroundings(deck)
     local m = C.ClearMargin
+    local lay = layoutOf(deck)
     local levels = { deck.z }
     if deck.z ~= 0 then table.insert(levels, 0) end
 
     local cleared = 0
     for _, z in ipairs(levels) do
-        for ox = -m, C.RoomSize + m do
-            for oy = -m, C.RoomSize + m do
-                local inside = ox >= 0 and ox <= C.RoomSize
-                               and oy >= 0 and oy <= C.RoomSize
+        for ox = -m, lay.w + m do
+            for oy = -m, lay.h + m do
+                local inside = ox >= 0 and ox <= lay.w and oy >= 0 and oy <= lay.h
                 if not (inside and z == deck.z) then
                     local x, y = at(deck, ox, oy)
                     local sq = U.square(x, y, z, false)
@@ -100,109 +96,6 @@ local function clearSurroundings(deck)
         end
     end
     U.debug("cleared %d objects from the margin around %s", cleared, deck.id)
-end
-
---- Sprites the mod used to place and no longer should. A rebuild preserves
---- anything the mod tagged -- that is the whole point of the tag -- so a
---- sprite that turns out to be the wrong one has to be named and taken out,
---- or it stands there for the life of the world.
----
---- The counter basins were placed on bare floor, where they hang over the
---- square behind and read as a sink set into the floor. `furnish` puts one
---- back on the counter square in the galley, which is where that sprite
---- belongs; everywhere else gets a pedestal sink instead.
-local LEGACY_SPRITES = {
-    ["fixtures_sinks_01_0"] = true, ["fixtures_sinks_01_1"] = true,
-    ["fixtures_sinks_01_2"] = true, ["fixtures_sinks_01_3"] = true,
-}
-
-local function stripLegacy(deck)
-    local removed = 0
-    local look = U.batch("stripLegacy")
-    for ox = 0, C.RoomSize do
-        for oy = 0, C.RoomSize do
-            local x, y = at(deck, ox, oy)
-            local sq = U.square(x, y, deck.z, false)
-            if sq then
-                local doomed = {}
-                look(function()
-                    U.eachObject(sq, function(o)
-                        local spr = o:getSprite()
-                        local name = spr and spr:getName()
-                        if name and LEGACY_SPRITES[name] then
-                            table.insert(doomed, o)
-                        end
-                    end)
-                    return true
-                end)
-                for _, o in ipairs(doomed) do
-                    if U.try("stripLegacy.remove", function()
-                        sq:RemoveTileObjectErosionNoRecalc(o)
-                        return true
-                    end) then removed = removed + 1 end
-                end
-            end
-        end
-    end
-    if removed > 0 then
-        U.log("%s: removed %d object(s) placed with a sprite the mod no longer uses",
-              deck.id, removed)
-    end
-end
-
---- The console room's galley corner, cleared for a new layout.
----
---- It used to run across two rows -- the sink on a counter *behind* the oven,
---- and a second rank of counters in front of the appliances that hid the
---- fridges and boxed the whole thing in. Revision 15 lays it as one run with
---- the aisle in front kept clear, and the old furniture has to come out for
---- that: a rebuild keeps everything the mod tagged, which is exactly what
---- makes moving geometry a migration rather than a rebuild.
----
---- One-time, flagged in state, and it takes the contents of those containers
---- with it. Only the kitchen's own tags, so the lamppost in the corner and the
---- wall shelves either side of it stay where they are.
-local GALLEY_TAGS = {
-    counter = true, pantry = true, sink = true,
-    oven = true, microwave = true, fridge = true,
-}
-
-local function relayGalley(deck)
-    local s = U.state()
-    if s.galleyRelaid then return end
-
-    local removed = 0
-    local look = U.batch("relayGalley")
-    for ox = 3, 11 do
-        for oy = 17, 22 do
-            local x, y = at(deck, ox, oy)
-            local sq = U.square(x, y, deck.z, false)
-            if sq then
-                local doomed = {}
-                look(function()
-                    U.eachObject(sq, function(o)
-                        local md = o:getModData()
-                        if md and GALLEY_TAGS[md.TARDIS] then
-                            table.insert(doomed, o)
-                        end
-                    end)
-                    return true
-                end)
-                for _, o in ipairs(doomed) do
-                    if U.try("relayGalley.remove", function()
-                        sq:RemoveTileObjectErosionNoRecalc(o)
-                        return true
-                    end) then removed = removed + 1 end
-                end
-            end
-        end
-    end
-
-    s.galleyRelaid = true
-    if removed > 0 then
-        U.log("console galley: cleared %d object(s) of the old two-row layout",
-              removed)
-    end
 end
 
 --- Earlier revisions stacked every deck on one footprint. Those levels are
@@ -229,759 +122,464 @@ local function purgeLegacyStack()
 end
 
 ---------------------------------------------------------------------------
--- Shell
+-- Handing things back
 ---------------------------------------------------------------------------
---- True when an offset is part of this deck floor plan.
-local function inShape(deck, ox, oy)
-    return C.inShape(ox, oy, deck.shape, C.RoomSize, deck.chamfer)
+-- **What a player keeps is never ours to throw out.** Anything the builder
+-- takes away -- an old deck's shelves on the refit, a fitting the layout no
+-- longer has -- gives up its contents first, as the live items (moving the
+-- item rather than its id keeps a magazine's rounds and a bottle's water).
+-- They go into the deck's new containers where there is room and onto the
+-- floor round the landing where there is not.
+
+--- Moves every item out of an object's containers into `into`.
+local function emptyInto(obj, into)
+    local c = U.containerOf(obj)
+    if not c then return 0 end
+    local items = {}
+    U.try("salvage.list", function()
+        local list = c:getItems()
+        for i = 0, list:size() - 1 do table.insert(items, list:get(i)) end
+    end)
+    local take = U.batch("salvage.remove")
+    for _, it in ipairs(items) do
+        if take(function() c:DoRemoveItem(it); return true end) then
+            table.insert(into, it)
+        end
+    end
+    return #items
 end
 
-local function buildFloor(deck)
-    local made = 0
+local function holdsAnything(obj)
+    local c = U.containerOf(obj)
+    return c ~= nil and (U.try("isEmpty", function() return c:getItems():size() end) or 0) > 0
+end
+
+--- Puts salvaged items into the given containers, by weight, and drops what
+--- is left on the floor round the landing. Returns counts.
+local function handBack(deck, salvage, containers)
+    if #salvage == 0 then return 0, 0 end
+    local placed, dropped = 0, 0
+    local put = U.batch("salvage.put")
+    local ci = 1
+    for _, it in ipairs(salvage) do
+        local w = U.try("salvage.weight", function() return it:getWeight() end) or 1
+        local done = false
+        while not done and ci <= #containers do
+            local c = containers[ci]
+            local cap = U.try("cap", function() return c:getCapacity() end) or 0
+            local have = U.try("have", function() return c:getCapacityWeight() end) or cap
+            if have + w <= cap then
+                done = put(function() c:AddItem(it); return true end) == true
+                if done then placed = placed + 1 end
+            else
+                ci = ci + 1
+            end
+        end
+        if not done then
+            local lay = layoutOf(deck)
+            local k = dropped % 9
+            local x, y = at(deck, lay.landing.x + (k % 3) - 1, lay.landing.y + math.floor(k / 3) - 1)
+            local sq = U.square(x, y, deck.z, false)
+            if sq and U.try("salvage.drop", function()
+                sq:AddWorldInventoryItem(it, 0.2 + ZombRandFloat(0, 0.6), 0.2 + ZombRandFloat(0, 0.6), 0)
+                return true
+            end) then dropped = dropped + 1 end
+        end
+    end
+    U.log("%s: handed back %d item(s) into the new fittings, %d onto the floor by the landing",
+          deck.name, placed, dropped)
+    return placed, dropped
+end
+
+---------------------------------------------------------------------------
+-- The refit: a deck built by the old generator
+---------------------------------------------------------------------------
+--- Every deck built before revision 16 is the octagonal hall of vanilla
+--- furniture the hand-placed builder made. **Moving geometry is a migration,
+--- not a rebuild** -- a rebuild keeps everything tagged, which would leave
+-- the old shelves standing in the new rooms -- so an old deck is cleared
+--- once, whole, before the layout goes down: every object on its footprint
+--- goes, its contents into `salvage`, and the old console item (a world
+--- item that opened like a crate) is lifted out the same way.
+---
+--- Kept: anything lying on the floor, and on the gardens every sown plot --
+--- the farming system has a record of each, and a plant is not ours to pull.
+local function refitLegacy(deck, salvage)
+    local cleared = 0
+    local farming = SFarmingSystem and SFarmingSystem.instance
+    local drop = U.batch("refit.remove")
     for ox = -1, C.RoomSize + 1 do
         for oy = -1, C.RoomSize + 1 do
-            -- Floor the room, and also the squares its walls stand on: a wall
-            -- on a midair square behaves badly.
-            if inShape(deck, ox, oy)
-               or inShape(deck, ox - 1, oy) or inShape(deck, ox + 1, oy)
-               or inShape(deck, ox, oy - 1) or inShape(deck, ox, oy + 1) then
-                local x, y = at(deck, ox, oy)
-                if U.addFloor(x, y, deck.z, deck.floor) then made = made + 1 end
-            end
-        end
-    end
-    return made
-end
-
---- Walls are derived from the floor plan rather than hard-coded, so changing
---- C.Shape reshapes the room and its walls together.
----
---- A wall lives on the north or west edge of its own square, so a room edge
---- facing east or south is drawn on the square just outside the room.
-local function buildWalls(deck)
-    local S = C.Sprites
-    local z = deck.z
-    local placed = 0
-
-    local function wall(ox, oy, sprite)
-        local x, y = at(deck, ox, oy)
-        if U.addObject(U.square(x, y, z, true), sprite, "wall") then
-            placed = placed + 1
-        end
-    end
-
-    for ox = 0, C.RoomSize do
-        for oy = 0, C.RoomSize do
-            if inShape(deck, ox, oy) then
-                if not inShape(deck, ox - 1, oy) then wall(ox, oy, S.wallW) end
-                if not inShape(deck, ox, oy - 1) then wall(ox, oy, S.wallN) end
-                if not inShape(deck, ox + 1, oy) then wall(ox + 1, oy, S.wallW) end
-                if not inShape(deck, ox, oy + 1) then wall(ox, oy + 1, S.wallN) end
-            end
-        end
-    end
-    U.debug("%s: %d wall segments", deck.id, placed)
-end
-
----------------------------------------------------------------------------
--- Lighting and power
----------------------------------------------------------------------------
-local function lightDeck(deck)
-    local S = C.Sprites
-    local z = deck.z
-    local cell = U.cell()
-
-    local spots = {
-        { 4, 4 }, { 12, 4 }, { 20, 4 },
-        { 4, 12 }, { 12, 12 }, { 20, 12 },
-        { 4, 20 }, { 12, 20 }, { 20, 20 },
-    }
-    local lamp = U.batch("light.lamppost")
-    for _, p in ipairs(spots) do
-        local x, y = at(deck, p[1], p[2])
-        local sq = U.square(x, y, z, true)
-        if sq then
-            U.addObject(sq, S.lamp.S, "lamp")
-            if cell then
-                lamp(function() cell:addLamppost(x, y, z, 0.95, 0.95, 0.88, 9) end)
-            end
-        end
-    end
-end
-
---- Marks the whole footprint as powered indoor space.
-local function powerDeck(deck)
-    local power = U.batch("power.setHaveElectricity")
-    for ox = 0, C.RoomSize do
-        for oy = 0, C.RoomSize do
             local x, y = at(deck, ox, oy)
             local sq = U.square(x, y, deck.z, false)
             if sq then
-                power(function() sq:setHaveElectricity(true) end)
-            end
-        end
-    end
-end
-
----------------------------------------------------------------------------
--- Furnishing helpers
----------------------------------------------------------------------------
---- Places a multi-tile piece from C.Pieces at an offset.
----
---- Each half carries its own offset taken from the tileset, so the head and
---- foot of a bed land the right way round. Nothing is placed unless every
---- square the piece needs is inside the room and free of other furniture.
-local function place(deck, pieceName, ox, oy, tag)
-    local piece = C.Pieces[pieceName]
-    if not piece then
-        U.warnOnce("piece:" .. tostring(pieceName), "no such piece")
-        return false
-    end
-    for _, part in ipairs(piece) do
-        local px, py = ox + part[2], oy + part[3]
-        if not inShape(deck, px, py) then return false end
-        if C.isLanding(px, py) then return false end
-    end
-    for _, part in ipairs(piece) do
-        local x, y = at(deck, ox + part[2], oy + part[3])
-        U.addObject(U.square(x, y, deck.z, true), part[1], tag)
-    end
-    return true
-end
-
---- True when every square within `inset` of this one is inside the room.
-local function inShapeEroded(deck, ox, oy, inset)
-    for dx = -inset, inset do
-        for dy = -inset, inset do
-            if not inShape(deck, ox + dx, oy + dy) then return false end
-        end
-    end
-    return true
-end
-
---- The band of squares `inset` in from the wall, each with the direction it
---- should face to look into the room.
----
---- Furniture placed from this follows whatever shape the deck is, so an
---- octagonal room gets its shelves along all eight walls without anything
---- being positioned by hand.
-local function wallRing(deck, inset)
-    local ring = {}
-    for ox = 0, C.RoomSize do
-        for oy = 0, C.RoomSize do
-            if inShapeEroded(deck, ox, oy, inset)
-               and not inShapeEroded(deck, ox, oy, inset + 1) then
-                local facing = "S"
-                if not inShapeEroded(deck, ox, oy - 1, inset) then facing = "S"
-                elseif not inShapeEroded(deck, ox, oy + 1, inset) then facing = "N"
-                elseif not inShapeEroded(deck, ox - 1, oy, inset) then facing = "E"
-                elseif not inShapeEroded(deck, ox + 1, oy, inset) then facing = "W"
+                local plant = farming and U.try("plantHere", function()
+                    return farming:getLuaObjectOnSquare(sq)
+                end) ~= nil
+                local doomed, consoles = {}, {}
+                U.eachObject(sq, function(o)
+                    if instanceof(o, "IsoWorldInventoryObject") then
+                        local item = U.try("worldItem", function() return o:getItem() end)
+                        local id = item and item:getFullType()
+                        if id == C.ConsoleItem or id == C.LegacyConsoleItem then
+                            table.insert(consoles, { obj = o, item = item })
+                        end
+                        return
+                    end
+                    if plant then return end
+                    table.insert(doomed, o)
+                end)
+                for _, cn in ipairs(consoles) do
+                    local inv = U.try("consoleInv", function() return cn.item:getInventory() end)
+                    if inv then
+                        U.try("consoleEmpty", function()
+                            local list = inv:getItems()
+                            local items = {}
+                            for i = 0, list:size() - 1 do table.insert(items, list:get(i)) end
+                            for _, it in ipairs(items) do
+                                inv:DoRemoveItem(it)
+                                table.insert(salvage, it)
+                            end
+                        end)
+                    end
+                    drop(function() sq:removeWorldObject(cn.obj) end)
+                    U.log("lifted the old console item out; its contents go to the hold")
                 end
-                table.insert(ring, { ox = ox, oy = oy, facing = facing })
-            end
-        end
-    end
-    return ring
-end
-
---- Places `count` copies of a sprite along a line, stocking each one.
---- `opts` may carry { loot = list, amount = n, tag = string }.
-local function line(deck, sprite, ox, oy, dx, dy, count, opts)
-    opts = opts or {}
-    local placed = {}
-    for i = 0, count - 1 do
-        local rx, ry = ox + dx * i, oy + dy * i
-        local x, y = at(deck, rx, ry)
-        local free = inShape(deck, rx, ry) and not C.isLanding(rx, ry)
-        local sq = free and U.square(x, y, deck.z, true) or nil
-        if sq then
-            local obj, created
-            if opts.loot then
-                obj, created = U.addContainer(sq, sprite, opts.tag)
-                -- Only ever stock a container the moment it is made. A
-                -- rebuild leaves a lived-in ship exactly as the player left it.
-                if created or C.DevRestock then
-                    U.stock(obj, opts.loot, opts.amount or 6)
-                end
-            else
-                obj = U.addObject(sq, sprite, opts.tag)
-            end
-            if obj then table.insert(placed, obj) end
-        end
-    end
-    return placed
-end
-
---- Every volume of every skill book, so the library is genuinely complete.
-local function skillBookList()
-    local books = {}
-    for _, l in ipairs(C.SkillBookLines) do
-        for v = 1, 5 do
-            table.insert(books, "Base.Book" .. l .. v)
-        end
-    end
-    return books
-end
-
----------------------------------------------------------------------------
--- The armoury
----------------------------------------------------------------------------
--- Crates deliberately packed rather than seeded: every firearm the build
--- ships, every magazine, every calibre in every packaging, the optics to go
--- on them, and holsters.
---
--- Capacity does not stop the stocking -- ItemContainer.AddItem never checks
--- it -- but a crate stocked past its capacity is one the player can only ever
--- take out of. So `copies` is chosen against the weight of each list and the
--- 50 a military crate holds; the per-copy weights are in the comments beside
--- each list in TARDIS_Config, and nothing here asks for more than about 48.
-
---- The crates every armoury gets, in the order the spots are listed.
-local ARMOURY = {
-    { loot = C.Loot.sidearms,    copies = 3, tag = "armoury.guns" },   -- 35.1
-    { loot = C.Loot.longarms,    copies = 1, tag = "armoury.rifles" }, -- 42.0
-    { loot = C.Loot.gunMags,     copies = 6, tag = "armoury.mags" },   --  7.2
-    { loot = C.Loot.pistolAmmo,  copies = 6, tag = "armoury.ammo" },   -- 29.5
-    { loot = C.Loot.attachments, copies = 4, tag = "armoury.optics" }, -- 11.2
-    { loot = C.Loot.holsters,    copies = 4, tag = "armoury.holsters" }, -- 8.8
-}
-
---- The stores deck carries the bulk on top of that: the cartons, and 5.56 by
---- the crate. Two crates of it, because it is what the M16 eats and it is the
---- calibre this ship is always short of.
-local ARMOURY_STORES = {}
-for _, spec in ipairs(ARMOURY) do table.insert(ARMOURY_STORES, spec) end
-table.insert(ARMOURY_STORES,
-    { loot = C.Loot.pistolCartons, copies = 1, tag = "armoury.cartons" })  -- 48.0
-table.insert(ARMOURY_STORES,
-    { loot = C.Loot.rifleCartons,  copies = 1, tag = "armoury.cartons" })  -- 32.0
-table.insert(ARMOURY_STORES,
-    { loot = C.Loot.ammo556,       copies = 8, tag = "armoury.556" })      -- 45.9
-table.insert(ARMOURY_STORES,
-    { loot = C.Loot.ammo556,       copies = 8, tag = "armoury.556" })      -- 45.9
--- A crate of katanas of its own, as well as the few laid in with the
--- sidearms. A crate that already exists is never restocked, so a list that
--- only appears inside an old crate never reaches a world already in play;
--- this one is a new crate on a new square, so it lands either way.
-table.insert(ARMOURY_STORES,
-    { loot = C.Loot.katanas,       copies = 4, tag = "armoury.blades" })   --  8.0
-
---- Places the armoury crates at the given offsets. Returns how many landed.
----
---- Uses U.stockEach, which puts one of everything in and then reads the
---- container back, so a calibre the engine refused is reported rather than
---- quietly absent.
-local function armouryBay(deck, spots, specs)
-    local placed = 0
-    for i, spec in ipairs(specs or ARMOURY) do
-        local spot = spots[i]
-        if spot and inShape(deck, spot[1], spot[2])
-           and not C.isLanding(spot[1], spot[2]) then
-            local x, y = at(deck, spot[1], spot[2])
-            local obj, made = U.addContainer(U.square(x, y, deck.z, true),
-                                             C.Sprites.crate, spec.tag)
-            if obj then
-                placed = placed + 1
-                if made or C.DevRestock then
-                    local _, missing = U.stockEach(obj, spec.loot, spec.copies)
-                    if #missing > 0 then
-                        U.log("armoury %s on %s could not hold: %s",
-                              spec.tag, deck.id, table.concat(missing, ", "))
+                for _, o in ipairs(doomed) do
+                    emptyInto(o, salvage)
+                    if drop(function() sq:RemoveTileObjectErosionNoRecalc(o); return true end) then
+                        cleared = cleared + 1
                     end
                 end
             end
         end
     end
-    U.debug("%s: %d armoury crates", deck.id, placed)
-    return placed
+    U.log("%s: refitted from the old layout -- %d objects cleared, %d items to hand back",
+          deck.name, cleared, #salvage)
 end
 
 ---------------------------------------------------------------------------
--- The hold
+-- Placing the layout
 ---------------------------------------------------------------------------
---- The ring of crates around the console, which is where the hold actually
---- lives: the console item is capped at 49 by the engine and a crate at 100.
----
---- Capacity and name are set on every pass rather than only on the one that
---- creates the crate. Both are fields of the container rather than of the
---- sprite, and re-applying them costs two calls per crate.
-local function holdRing(deck)
-    local crates = {}
-    for _, spot in ipairs(C.ConsoleHold.spots) do
-        if inShape(deck, spot[1], spot[2]) and not C.isLanding(spot[1], spot[2]) then
-            local x, y = at(deck, spot[1], spot[2])
-            local obj = U.addContainer(U.square(x, y, deck.z, true),
-                                       C.Sprites.crate, "hold")
-            local c = obj and U.containerOf(obj)
-            if c then
-                U.try("hold.setCapacity", function()
-                    c:setCapacity(C.ConsoleHold.capacity)
-                end)
-                U.try("hold.setCustomName", function()
-                    c:setCustomName(C.ConsoleHold.name)
-                end)
-                table.insert(crates, c)
-            end
-        end
-    end
-    return crates
+local function isDoorKind(kind) return kind == "dW" or kind == "dN" end
+
+local function spriteOf(o)
+    return U.try("spriteName", function()
+        local spr = o:getSprite()
+        return spr and spr:getName()
+    end)
 end
 
---- Moves the heavy end of the console's contents out into the ring.
----
---- The kit is 395 weight and the console holds 49, so nearly all of it has to
---- live in the crates. Heaviest first, which leaves the console holding what
---- you would actually want to grab on the way out -- screwdrivers, pills,
---- bandages, a pistol -- and puts the cartons and the tins in the ring.
----
---- Runs on every build, not only the one that stocks the kit: a world that
---- already had everything piled into the console (AddItems does not check
---- capacity, so it all went in) is put right the next time the deck is built.
-local function spillHold(hold, crates)
-    if not hold or #crates == 0 then return 0 end
+local function tagOf(o)
+    return U.try("md", function() return o:getModData().TARDIS end)
+end
 
-    local cap  = U.try("hold.capacity", function() return hold:getCapacity() end) or 0
-    local have = U.try("hold.weight", function() return hold:getCapacityWeight() end) or 0
-    if cap <= 0 or have <= cap then return 0 end
-
-    -- How much each crate will take, tallied here rather than re-read per
-    -- item: this loop is one of the longest in the mod.
-    local room = {}
-    for i, c in ipairs(crates) do
-        local ccap = U.try("crate.capacity", function() return c:getCapacity() end) or 0
-        local cwt  = U.try("crate.weight", function() return c:getCapacityWeight() end) or 0
-        room[i] = ccap - cwt
-    end
-
-    -- Read the contents into a Lua list before moving any of them. Walking
-    -- the Java list while taking things out of it skips every other item.
-    local entries = {}
-    U.try("hold.items", function()
-        local items = hold:getItems()
-        if not items then return end
-        for i = 0, items:size() - 1 do
-            local it = items:get(i)
-            if it then
-                local w = U.try("item.weight", function() return it:getWeight() end) or 0
-                table.insert(entries, { item = it, w = w })
+--- Our door on this square's north (or west) edge, whatever it looks like.
+--- **Never find a door by its sprite**: an open door wears the sprite two
+--- along, so a builder asking for the closed one misses every door somebody
+--- has walked through, and puts a second one in it.
+local function ourDoor(sq, north)
+    local found = nil
+    U.try("ourDoor", function()
+        local list = sq:getSpecialObjects()
+        for i = 0, list:size() - 1 do
+            local o = list:get(i)
+            if instanceof(o, "IsoDoor") and tagOf(o) ~= nil and o:getNorth() == north then
+                found = o
+                return
             end
         end
     end)
-    table.sort(entries, function(a, b) return a.w > b.w end)
-
-    local moved, ci = 0, 1
-    local shift = U.batch("hold.spill")
-    for _, e in ipairs(entries) do
-        if have <= cap then break end
-        while ci <= #crates and room[ci] < e.w do ci = ci + 1 end
-        if ci > #crates then break end
-        -- The game's own transfer takes the item out of the source first and
-        -- adds it to the destination second; follow it.
-        local ok = shift(function()
-            hold:DoRemoveItem(e.item)
-            crates[ci]:AddItem(e.item)
-            return true
-        end)
-        if not ok then break end
-        room[ci] = room[ci] - e.w
-        have = have - e.w
-        moved = moved + 1
-    end
-
-    if moved > 0 then
-        U.log("console hold: moved %d item(s) into the ring, %d of %d aboard",
-              moved, math.floor(have), cap)
-    end
-    return moved
+    return found
 end
 
----------------------------------------------------------------------------
--- Deck dressing
----------------------------------------------------------------------------
-local furnish = {}
+--- What a layout entry has standing for it on this square already, if anything.
+local function standing(sq, o)
+    if isDoorKind(o[4]) then return ourDoor(sq, o[4] == "dN") end
+    return U.findSprite(sq, o[3])
+end
 
---- Console room.
----
---- The show settled early on a large room with a hexagonal console and a
---- glass column at its centre, roundel walls, and furniture and antiques
---- strewn about the edges -- a bookshelf, a chair, a lamp, a clock, chests,
---- a scanner. Roundels have no equivalent in the tileset, but the rest does,
---- so the console stands alone in the middle and everything else is arranged
---- around the octagonal wall.
----
---- It is also somewhere the Doctor lives, so there is a bed, a desk and real
---- storage rather than a bare control deck.
-furnish.console = function(deck)
-    local S = C.Sprites
+--- A water store of its own, full: vanilla's addWaterContainer. A sink's
+--- sprite properties are not a supply -- `createFluidContainersFromSprite
+--- Properties` is empty in build 42 -- and the ship is not on the mains.
+local function addWaterStore(obj)
+    local f = ComponentType.FluidContainer:CreateComponent()
+    f:setCapacity(20)
+    f:addFluid(FluidType.Water, 20)
+    GameEntityFactory.AddComponent(obj, true, f)
+end
 
-    -- The console itself, centred, on a rug -- and, since revision 11, the
-    -- ship's hold as well: the item is a container, so the model opens like a
-    -- crate and carries C.ConsoleKit.
-    --
-    -- A world built before that has the old plain console standing here. It
-    -- is lifted out and this one put down in its place; a plain item cannot
-    -- grow an inventory, and reusing the id would have meant loading a save
-    -- as a class that never wrote it.
-    local cx, cy = 12, 12
-    local hold                                  -- the console's own container
-    local x, y = at(deck, cx, cy)
-    local sq = U.square(x, y, deck.z, true)
-    if sq then
-        local console, legacy = nil, {}
-        U.try("scanConsole", function()
-            local items = sq:getWorldObjects()
-            if items then
-                for i = 0, items:size() - 1 do
-                    local it = items:get(i)
-                    local item = it and it:getItem()
-                    local id = item and item:getFullType()
-                    if id == C.ConsoleItem then
-                        console = item
-                    elseif id == C.LegacyConsoleItem then
-                        table.insert(legacy, it)
+--- Makes one layout object. Returns it, or nil.
+local function make(sq, o)
+    local sprite, kind, piece = o[3], o[4], o[5]
+    local use = (piece and L.uses[piece]) or {}
+    local tag = piece or (isDoorKind(kind) and "door" or "wall")
+    if isDoorKind(kind) then
+        local door = U.try("IsoDoor.new", function()
+            -- The String constructor: it starts closed, and is never locked
+            -- at random (the IsoSprite one rolls against the locked-houses
+            -- sandbox option).
+            return IsoDoor.new(getCell(), sq, sprite, kind == "dN")
+        end)
+        if not door then return nil end
+        U.try("tag", function() door:getModData().TARDIS = tag end)
+        -- A closed door only blocks from the square's special-objects list.
+        if U.try("AddSpecialObject", function() sq:AddSpecialObject(door); return true end) then
+            return door
+        end
+        return nil
+    end
+
+    local obj
+    if use.stove then
+        -- A real stove: the engine decides the class from what built the
+        -- object, not from the sprite, and a range that is an IsoObject
+        -- wearing an oven's picture cooks nothing.
+        obj = U.try("IsoStove.new", function() return IsoStove.new(getCell(), sq, getSprite(sprite)) end)
+    end
+    obj = obj or U.try("IsoObject.new", function() return IsoObject.new(sq, sprite, "") end)
+    if not obj then return nil end
+    U.try("tag", function() obj:getModData().TARDIS = tag end)
+    if kind == "c" or use.stove then
+        -- A map-loaded object gets its container for free; a runtime one
+        -- does not. Explored, or vanilla rolls its own loot into it.
+        U.try("containers", function()
+            obj:createContainersFromSpriteProperties()
+            local c = U.containerOf(obj)
+            if c then c:setExplored(true) end
+        end)
+    end
+    if use.water then U.try("water:" .. tostring(piece), addWaterStore, obj) end
+    if not U.try("AddTileObject", function() sq:AddTileObject(obj); return true end) then
+        return nil
+    end
+    return obj
+end
+
+--- Floors: laid where there are none, and replaced where the layout wants a
+--- different one -- except under a sown plot, which keeps whatever it grows in.
+local function layFloors(deck, lay)
+    local laid = 0
+    local farming = SFarmingSystem and SFarmingSystem.instance
+    local swap = U.batch("floor.swap")
+    for _, f in ipairs(lay.floors) do
+        local x, y = at(deck, f[1], f[2])
+        local sq = U.square(x, y, deck.z, true)
+        if sq then
+            local floor = U.try("getFloor", function() return sq:getFloor() end)
+            local name = floor and spriteOf(floor)
+            if name ~= f[3] then
+                local plant = floor and farming and U.try("plantHere", function()
+                    return farming:getLuaObjectOnSquare(sq)
+                end) ~= nil
+                if not plant then
+                    if floor then swap(function() sq:RemoveTileObjectErosionNoRecalc(floor) end) end
+                    if U.try("addFloor", function() sq:addFloor(f[3]); return true end) then
+                        laid = laid + 1
                     end
                 end
             end
-        end)
-
-        local drop = U.batch("removeWorldObject")
-        for _, old in ipairs(legacy) do
-            drop(function() sq:removeWorldObject(old) end)
-        end
-        if #legacy > 0 then
-            U.log("replaced %d legacy console item(s) with the hold", #legacy)
-        end
-
-        local fresh = false
-        if not console then
-            console = U.try("addConsole", function()
-                return sq:AddWorldInventoryItem(C.ConsoleItem, 0.5, 0.5, 0.0)
-            end)
-            fresh = console ~= nil
-        end
-
-        hold = console and U.try("consoleInventory", function()
-            return console:getInventory()
-        end)
-        if console and not hold then
-            U.warnOnce("consoleHold",
-                       "the console item carries no container")
-        end
-
-        -- Stocked on the pass that puts the console down and never again.
-        -- The hold is a container like any other: what gets taken out of it
-        -- stays taken, and a rebuild finds the console already standing.
-        if fresh and hold then
-            local _, short = U.stockKit(hold, C.ConsoleKit)
-            if #short > 0 then
-                U.log("console hold short of: %s", table.concat(short, ", "))
-            end
         end
     end
-
-    -- a floor covering under and around the console
-    for dx = -2, 2 do
-        for dy = -2, 2 do
-            if not (dx == 0 and dy == 0) then
-                local rx, ry = at(deck, cx + dx, cy + dy)
-                U.addObject(U.square(rx, ry, deck.z, true), S.rug, "rug")
-            end
-        end
-    end
-
-    -- The rest of the hold: crates on the rug around the console, and the
-    -- heavy end of what is aboard moved out into them.
-    spillHold(hold, holdRing(deck))
-
-    -- The case of sonic screwdrivers, stood beside the console where anyone
-    -- walking up from the landing will see it. Stocked with U.stockEach
-    -- rather than U.stock: there is exactly one item type in it and the read
-    -- back proves all three arrived rather than hoping they did.
-    local bx, by = at(deck, C.SonicBox.x, C.SonicBox.y)
-    if inShape(deck, C.SonicBox.x, C.SonicBox.y)
-       and not C.isLanding(C.SonicBox.x, C.SonicBox.y) then
-        local box, madeBox = U.addContainer(U.square(bx, by, deck.z, true),
-                                            S.crate, "sonic")
-        if box and (madeBox or C.DevRestock) then
-            local present = U.stockEach(box, { C.SonicItem }, C.SonicCount)
-            local n = present[C.SonicItem] or 0
-            if n < C.SonicCount then
-                U.log("sonic case holds %d of %d screwdrivers", n, C.SonicCount)
-            end
-        end
-    else
-        U.warnOnce("sonicBox", "C.SonicBox falls outside the console room")
-    end
-
-    -- Corners that are furnished by hand below. The wall ring skips them so
-    -- nothing ends up stacked two objects deep on one square.
-    local function reserved(ox, oy)
-        return (ox >= 3 and ox <= 11 and oy >= 3 and oy <= 11)      -- living corner
-            or (ox >= 3 and ox <= 11 and oy >= 17 and oy <= 22)     -- galley corner
-            or (ox >= 14 and ox <= 22 and oy >= 12 and oy <= 18)    -- armoury bay
-            or (ox >= 14 and ox <= 20 and oy >= 19 and oy <= 22)    -- stores
-    end
-
-    -- Dress the wall. The ring follows the octagon, so this fills all eight
-    -- walls without a single hand-placed coordinate.
-    local ring = wallRing(deck, 1)
-    local pattern = {
-        { kind = "shelf", loot = C.Loot.magazines, amount = 6 },
-        { kind = "chest", loot = C.Loot.tools, amount = 8 },
-        { kind = "chair" },
-        { kind = "shelf", loot = C.Loot.media, amount = 5 },
-        { kind = "lamp" },
-        { kind = "chest", loot = C.Loot.medical, amount = 6 },
-        { kind = "gap" },
-        { kind = "shelf", loot = C.Loot.magazines, amount = 6 },
-        { kind = "radio" },
-        { kind = "gap" },
-    }
-    for i, spot in ipairs(ring) do
-        if not C.isLanding(spot.ox, spot.oy)
-           and not reserved(spot.ox, spot.oy) then
-            local entry = pattern[((i - 1) % #pattern) + 1]
-            local f = spot.facing
-            local sx, sy = at(deck, spot.ox, spot.oy)
-            local square = U.square(sx, sy, deck.z, true)
-            if entry.kind == "shelf" then
-                local obj, made = U.addContainer(square, S.bookShelf[f] or S.bookShelf.S, "books")
-                if made or C.DevRestock then U.stock(obj, entry.loot, entry.amount) end
-            elseif entry.kind == "chest" then
-                local obj, made = U.addContainer(square, S.chest[f] or S.chest.S, "chest")
-                if made or C.DevRestock then U.stock(obj, entry.loot, entry.amount) end
-            elseif entry.kind == "chair" then
-                U.addObject(square, S.chair[f] or S.chair.S, "chair")
-            elseif entry.kind == "lamp" then
-                U.addObject(square, S.lamp[f] or S.lamp.S, "lamp")
-            elseif entry.kind == "radio" then
-                U.addObject(square, S.radio[f] or S.radio.S, "radio")
-            end
-        end
-    end
-
-    -- The lived-in corner: a bed, a desk and a wardrobe in the north-west of
-    -- the chamber, well clear of the console and the doorway.
-    place(deck, "bedFancyS", 5, 5, "bed")
-    local nsx, nsy = at(deck, 6, 5)
-    local night, madeNight = U.addContainer(U.square(nsx, nsy, deck.z, true),
-                                            S.chest.S, "chest")
-    if madeNight or C.DevRestock then U.stock(night, C.Loot.linen, 3) end
-
-    place(deck, "wardrobeS", 8, 4, "wardrobe")
-    place(deck, "deskS", 5, 9, "desk")
-    local chx, chy = at(deck, 5, 10)
-    U.addObject(U.square(chx, chy, deck.z, true), S.chair.N, "chair")
-
-    -- the scanner, and a clock, on the wall opposite the doors
-    local scx, scy = at(deck, 12, 4)
-    U.addObject(U.square(scx, scy, deck.z, true), S.scanner.S, "scanner")
-    local clx, cly = at(deck, 14, 4)
-    U.addObject(U.square(clx, cly, deck.z, true), S.clock.S, "clock")
-
-    -- The armoury, on the deck you actually arrive on, along the east wall
-    -- where there is room for a rank of crates.
-    armouryBay(deck, { { 16, 14 }, { 18, 14 }, { 20, 14 },
-                       { 16, 16 }, { 18, 16 }, { 20, 16 } })
-
-    -- A galley corner in the south-west, so the deck you live on can feed
-    -- you without a trip down to the galley proper.
-    local function fit(ox, oy, sprite, tag, loot, amount)
-        if not inShape(deck, ox, oy) or C.isLanding(ox, oy) then return nil end
-        local fx, fy = at(deck, ox, oy)
-        local sq = U.square(fx, fy, deck.z, true)
-        if not loot then
-            return (U.addObject(sq, sprite, tag))
-        end
-        local obj, made = U.addContainer(sq, sprite, tag)
-        if obj and (made or C.DevRestock) then U.stock(obj, loot, amount) end
-        return obj
-    end
-
-    relayGalley(deck)
-
-    -- One straight run along row 20, all of it facing into the room: wet end,
-    -- cooking, then cold. The sink and the microwave are counter-top art, so
-    -- each gets a counter under it -- that is what makes a basin read as a
-    -- kitchen sink rather than a bath left on the floor.
-    --
-    -- Nothing goes on row 21. An appliance run with a second row of counters
-    -- in front of it is a wall: the fridges end up behind it, half drawn and
-    -- awkward to reach. The pantry faces the run across that aisle instead.
-    fit(5, 20, S.counter.N, "counter")
-    local sinkRun = fit(5, 20, S.sinkBasin.N, "sink")
-    local oven    = fit(6, 20, S.oven.N, "oven")
-    fit(7, 20, S.counter.N, "counter")
-    fit(7, 20, S.microwave.N, "microwave", C.Loot.food, 3)
-    fit(8, 20, S.counter.N, "counter", C.Loot.cookware, 6)
-    fit(9, 20, S.fridge.N, "fridge", C.Loot.food, 12)
-    fit(10, 20, S.fridge.N, "fridge", C.Loot.food, 12)
-    line(deck, S.counter.N, 6, 22, 1, 0, 5,
-         { loot = C.Loot.food, amount = 10, tag = "pantry" })
-
-    -- Said out loud because a sprite that does not land leaves an empty
-    -- square and no error anywhere, and this corner is the one thing on the
-    -- deck that gets looked for by name.
-    U.log("console galley: sink %s, oven %s",
-          sinkRun and "ok" or "MISSING", oven and "ok" or "MISSING")
-
-    -- general stores along the south-east
-    line(deck, S.locker.N, 16, 20, 1, 0, 3,
-         { loot = C.Loot.tools, amount = 10, tag = "locker" })
+    return laid
 end
 
---- Habitation.
----
---- Laid out as proper cabins rather than a dormitory: each berth is a bed
---- with its own nightstand, a wardrobe shared between pairs, and a reading
---- lamp, in two ranks with a walking aisle between them. The wet block runs
---- along the west wall.
----
---- Beds go down through C.Pieces, which carries the per-half offsets from the
---- tileset. Placing the two halves by hand is what made the old bunks look
---- mismatched: every bed had its foot laid where its head should be.
-furnish.housing = function(deck)
-    local S = C.Sprites
-
-    local berths = 0
-    for rank = 0, 1 do
-        local ox = 7 + rank * 7
-        for i = 0, 3 do
-            local oy = 5 + i * 4
-            if place(deck, "bedS", ox, oy, "bed") then
-                berths = berths + 1
-
-                local nx, ny = at(deck, ox + 1, oy)
-                local night, made = U.addContainer(U.square(nx, ny, deck.z, true),
-                                                   S.chest.S, "nightstand")
-                if made or C.DevRestock then U.stock(night, C.Loot.linen, 3) end
-
-                if i % 2 == 0 then
-                    place(deck, "wardrobeS", ox + 2, oy, "wardrobe")
+--- Takes away what the layout no longer puts on a square: a fitting we
+--- placed that is not in it any more. Its contents go to `salvage`.
+local function stripStale(deck, lay, salvage)
+    local want = {}
+    for _, o in ipairs(lay.objects) do
+        local key = o[1] .. "," .. o[2]
+        want[key] = want[key] or {}
+        if isDoorKind(o[4]) then
+            want[key][o[4]] = true
+        else
+            want[key][o[3]] = true
+        end
+    end
+    local removed = 0
+    local drop = U.batch("stale.remove")
+    for ox = -1, lay.w + 1 do
+        for oy = -1, lay.h + 1 do
+            local x, y = at(deck, ox, oy)
+            local sq = U.square(x, y, deck.z, false)
+            if sq then
+                local here = want[ox .. "," .. oy] or {}
+                local doomed = {}
+                U.eachObject(sq, function(o)
+                    if instanceof(o, "IsoWorldInventoryObject") then return end
+                    if tagOf(o) == nil then return end
+                    if instanceof(o, "IsoDoor") then
+                        local north = U.try("north", function() return o:getNorth() end) == true
+                        if here[north and "dN" or "dW"] then return end
+                    elseif here[spriteOf(o)] then
+                        return
+                    end
+                    table.insert(doomed, o)
+                end)
+                for _, o in ipairs(doomed) do
+                    emptyInto(o, salvage)
+                    if drop(function() sq:RemoveTileObjectErosionNoRecalc(o); return true end) then
+                        removed = removed + 1
+                    end
                 end
-
-                local lx, ly = at(deck, ox - 1, oy)
-                U.addObject(U.square(lx, ly, deck.z, true), S.lamp.E, "lamp")
             end
         end
     end
-    U.debug("housing: %d berths", berths)
+    if removed > 0 then U.log("%s: took away %d fitting(s) the layout no longer has", deck.name, removed) end
+end
 
-    -- Wet block along the west wall: basins, cubicles, then showers.
-    line(deck, S.sink.W, 2, 4, 0, 1, 5, { tag = "sink" })
-    line(deck, S.toilet.W, 2, 11, 0, 1, 5, { tag = "toilet" })
-    line(deck, S.shower.W, 2, 17, 0, 1, 4, { tag = "shower" })
+---------------------------------------------------------------------------
+-- Stocking
+---------------------------------------------------------------------------
+-- **A container is stocked once, ever: the moment it is made.** Once a shelf
+-- exists it is the player's -- what they eat stays eaten -- and stocking an
+-- existing one again would pile a second helping on the first.
 
-    -- Linen stores against the east wall.
-    line(deck, S.metalShelf.W, 20, 8, 0, 1, 8,
-         { loot = C.Loot.linen, amount = 8, tag = "rack" })
+--- Every volume of every skill book, so the library is genuinely complete.
+local BOOKS = {}
+for _, l in ipairs(C.SkillBookLines) do
+    for v = 1, 5 do table.insert(BOOKS, "Base.Book" .. l .. v) end
+end
 
-    -- A pair of chairs, so the deck is not purely functional.
-    for _, ox in ipairs({ 12, 14 }) do
-        local cx, cy = at(deck, ox, 21)
-        U.addObject(U.square(cx, cy, deck.z, true), S.chair.N, "chair")
+local function lootList(name)
+    if name == "books" then return BOOKS end
+    return C.Loot[name]
+end
+
+-- The armouries: crates packed rather than seeded -- every firearm the build
+-- ships, every magazine, every calibre in every packaging, the optics to go on
+-- them, and holsters. A container that far over capacity is one the player can
+-- only take out of, so `copies` is chosen against each list's weight (the
+-- numbers beside the lists in TARDIS_Config) and the 50 a cabinet or a trunk
+-- holds. Handed out in layout order to the pieces named.
+local ARMOURY = {
+    { loot = C.Loot.sidearms,    copies = 3 },   -- 35.1
+    { loot = C.Loot.longarms,    copies = 1 },   -- 42.0
+    { loot = C.Loot.gunMags,     copies = 6 },   --  7.2
+    { loot = C.Loot.pistolAmmo,  copies = 6 },   -- 29.5
+    { loot = C.Loot.attachments, copies = 4 },   -- 11.2
+    { loot = C.Loot.holsters,    copies = 4 },   --  8.8
+}
+local ARMOURY_TRUNKS = {
+    { loot = C.Loot.katanas,     copies = 4 },   --  8.0
+    { loot = C.Loot.rifleAmmo,   copies = 6 },   -- 20.3
+    { loot = C.Loot.pistolAmmo,  copies = 6 },   -- 29.5
+    { loot = C.Loot.gunMags,     copies = 8 },   --  9.6
+}
+local ARMOURY_STORES = {}
+for _, spec in ipairs(ARMOURY) do table.insert(ARMOURY_STORES, spec) end
+for _, spec in ipairs({
+    { loot = C.Loot.pistolCartons, copies = 1 },  -- 48.0
+    { loot = C.Loot.rifleCartons,  copies = 1 },  -- 32.0
+    { loot = C.Loot.ammo556,       copies = 8 },  -- 45.9
+    { loot = C.Loot.ammo556,       copies = 8 },  -- 45.9
+    { loot = C.Loot.katanas,       copies = 4 },  --  8.0
+}) do table.insert(ARMOURY_STORES, spec) end
+
+local PACKED = {
+    console = { gun_cabinet = ARMOURY, steamer_trunk = ARMOURY_TRUNKS },
+    storage = { steamer_trunk = ARMOURY_STORES },
+}
+
+--- Packs C.ConsoleKit across the hold's containers in order, moving on to the
+--- next when one is full. Returns the kit entries that did not all land.
+local function packKit(containers)
+    local ci, short = 1, {}
+    local add = U.batch("kit.AddItem")
+    for _, entry in ipairs(C.ConsoleKit) do
+        local id, want = entry[1], entry[2] or 1
+        local got = 0
+        for _ = 1, want do
+            local placed = false
+            while not placed and ci <= #containers do
+                local c = containers[ci]
+                local it = add(function() return c:AddItem(id) end)
+                if not it then break end
+                local cap = U.try("kit.cap", function() return c:getCapacity() end) or 0
+                local have = U.try("kit.have", function() return c:getCapacityWeight() end) or 0
+                if have > cap and ci < #containers then
+                    U.try("kit.move", function() c:DoRemoveItem(it) end)
+                    ci = ci + 1
+                else
+                    placed = true
+                end
+            end
+            if placed then got = got + 1 else break end
+        end
+        if got < want then table.insert(short, string.format("%s %d/%d", id, got, want)) end
     end
+    return short
 end
 
---- Stores, with the armoury along its south side.
----
---- The armoury is five military crates, deliberately packed rather than
---- sprinkled: every firearm the build ships, every magazine, every calibre in
---- every packaging, and the optics to go on them. Crates hold fifty, so each
---- one is filled rather than seeded.
-furnish.storage = function(deck)
-    local S = C.Sprites
-
-    -- general stores: six aisles of shelving running north to south
-    local racks = {
-        { C.Loot.tools, 10 }, { C.Loot.tools, 10 }, { C.Loot.medical, 10 },
-        { C.Loot.medical, 10 }, { C.Loot.tools, 10 }, { C.Loot.linen, 8 },
-    }
-    for i, spec in ipairs(racks) do
-        local ox = 3 + (i - 1) * 2
-        line(deck, S.metalShelf.S, ox, 3, 0, 1, 19,
-             { loot = spec[1], amount = spec[2], tag = "rack" })
+--- Stocks the containers made on this pass. `made` is a list of
+--- { obj = ..., piece = ... } in layout order.
+local function stockDeck(deck, made)
+    local s = U.state()
+    local rules = C.Stock[deck.id] or {}
+    local packed = PACKED[deck.id] or {}
+    local seen, hold = {}, {}
+    for _, m in ipairs(made) do
+        local piece = m.piece
+        seen[piece] = (seen[piece] or 0) + 1
+        local n = seen[piece]
+        if C.HoldPieces[piece] then
+            table.insert(hold, U.containerOf(m.obj))
+        elseif piece == "sonic_case" then
+            local present = U.stockEach(m.obj, { C.SonicItem }, C.SonicCount)
+            if (present[C.SonicItem] or 0) < C.SonicCount then
+                U.log("sonic case holds %d of %d screwdrivers", present[C.SonicItem] or 0, C.SonicCount)
+            end
+        elseif packed[piece] then
+            local spec = packed[piece][n]
+            if spec then
+                local _, missing = U.stockEach(m.obj, spec.loot, spec.copies)
+                if #missing > 0 then
+                    U.log("%s %s %d could not hold: %s", deck.id, piece, n, table.concat(missing, ", "))
+                end
+            end
+        else
+            local rule = rules[piece] or C.Stock.any[piece]
+            if rule then
+                local name = rule.loot or (rule.cycle and rule.cycle[((n - 1) % #rule.cycle) + 1])
+                local list = name and lootList(name)
+                if list then
+                    U.stock(m.obj, list, rule.amount or 6)
+                else
+                    U.warnOnce("loot:" .. tostring(name), "no C.Loot list named " .. tostring(name))
+                end
+            end
+        end
     end
-
-    -- lockers of medical supplies by the landing
-    line(deck, S.locker.S, 16, 4, 0, 2, 6,
-         { loot = C.Loot.medical, amount = 8, tag = "locker" })
-
-    -- The full armoury down here, where the bulk stores live: the six crates
-    -- every bay gets along the south wall, and the heavy four -- the cartons
-    -- and the two crates of 5.56 -- in the row behind them, each reachable
-    -- from the gap between the crates in front.
-    armouryBay(deck, { { 5, 23 }, { 8, 23 }, { 11, 23 },
-                       { 14, 23 }, { 17, 23 }, { 20, 23 },
-                       { 6, 24 }, { 9, 24 }, { 12, 24 }, { 15, 24 },
-                       { 18, 24 } },
-               ARMOURY_STORES)
-
-    -- gun racks on the wall behind the crates
-    line(deck, S.metalShelf.N, 6, 21, 2, 0, 6,
-         { loot = C.Loot.firearms, amount = 8, tag = "armoury.rack" })
-    line(deck, S.locker.N, 18, 21, 1, 0, 3,
-         { loot = C.Loot.gunAmmo, amount = 20, tag = "armoury.locker" })
-end
-
---- Library: skill books, magazines and tapes.
-furnish.library = function(deck)
-    local S = C.Sprites
-    local books = skillBookList()
-    for i = 1, 6 do
-        local ox = 2 + (i - 1) * 2
-        line(deck, S.bookShelf.S, ox, 2, 0, 1, 20,
-             { loot = books, amount = 12, tag = "books" })
+    -- The kit goes aboard once in the life of a world. A world that had the
+    -- old console item already has it (the refit handed it back).
+    if #hold > 0 and not s.kitPacked then
+        local short = packKit(hold)
+        s.kitPacked = true
+        if #short > 0 then U.log("the hold is short of: %s", table.concat(short, ", ")) end
     end
-    line(deck, S.magShelf.S, 14, 3, 0, 2, 9,
-         { loot = C.Loot.magazines, amount = 10, tag = "magazines" })
-    line(deck, S.magShelf.N, 2, 23, 2, 0, 7,
-         { loot = C.Loot.media, amount = 8, tag = "tapes" })
-end
-
---- Galley: counters, cold storage and ovens, all stocked.
-furnish.galley = function(deck)
-    local S = C.Sprites
-    line(deck, S.counter.N, 2, 2, 1, 0, 12,
-         { loot = C.Loot.cookware, amount = 6, tag = "counter" })
-    line(deck, S.counter.N, 2, 23, 1, 0, 12,
-         { loot = C.Loot.cookware, amount = 6, tag = "counter" })
-    line(deck, S.fridge.S, 2, 6, 2, 0, 6,
-         { loot = C.Loot.food, amount = 12, tag = "fridge" })
-    line(deck, S.fridge.S, 2, 18, 2, 0, 6,
-         { loot = C.Loot.food, amount = 12, tag = "fridge" })
-    line(deck, S.oven.S, 2, 10, 2, 0, 5, { tag = "oven" })
-    line(deck, S.counter.N, 2, 14, 1, 0, 12,
-         { loot = C.Loot.food, amount = 10, tag = "pantry" })
-    line(deck, S.sink.W, 1, 3, 0, 1, 3, { tag = "sink" })
-end
-
---- Hydroponics: sown plots under grow lamps, with seed stores and taps.
-furnish.growing = function(deck)
-    local S = C.Sprites
-    line(deck, S.metalShelf.S, 15, 3, 0, 2, 8,
-         { loot = C.Loot.seeds, amount = 10, tag = "seeds" })
-    line(deck, S.sink.W, 1, 3, 0, 1, 4, { tag = "sink" })
-    B.sowPlots(deck)
-    B.stockAnimals(deck)
 end
 
 ---------------------------------------------------------------------------
 -- Farming and livestock
 ---------------------------------------------------------------------------
---- Plows and sows the growing deck. SFarmingSystem is the server-side owner
+--- Plows and sows the crop beds: every square of the layout's `beds` that is
+--- not an aisle (every third column). SFarmingSystem is the server-side owner
 --- of plants even in single player, so everything goes through it.
 function B.sowPlots(deck)
+    local lay = layoutOf(deck)
+    if not lay.beds then return 0 end
     if not SFarmingSystem or not SFarmingSystem.instance then
-        U.warnOnce("farming", "SFarmingSystem unavailable; plots left bare")
+        U.warnOnce("farming", "SFarmingSystem unavailable; beds left bare")
         return 0
     end
     local sown = 0
     local n = #C.Crops
     local plow = U.batch("farm.plow")
-    for ox = 2, 13 do
-        for oy = 2, 21 do
-            if (ox % 3) ~= 0 then          -- leave walkable aisles
+    local b = lay.beds
+    for ox = b.x0, b.x1 do
+        for oy = b.y0, b.y1 do
+            if (ox % 3) ~= 0 then
                 local x, y = at(deck, ox, oy)
                 local sq = U.square(x, y, deck.z, true)
                 if sq then
@@ -1007,13 +605,37 @@ function B.sowPlots(deck)
     return sown
 end
 
---- Adds livestock if the build exposes the animal API. Purely a bonus: a
---- failure here must never stop the deck from finishing.
+--- The free squares of the room called `name` on a deck.
+local function roomSquares(deck, name)
+    local lay = layoutOf(deck)
+    local rid
+    for i, r in ipairs(lay.rooms) do if r == name then rid = i end end
+    local taken = {}
+    for _, o in ipairs(lay.objects) do
+        if o[4] == "f" or o[4] == "c" then taken[o[1] .. "," .. o[2]] = true end
+    end
+    local out = {}
+    for oy = 1, lay.h do
+        for ox = 1, lay.w do
+            if lay.grid[oy][ox] == rid and not taken[(ox - 1) .. "," .. (oy - 1)] then
+                table.insert(out, { ox - 1, oy - 1 })
+            end
+        end
+    end
+    return out
+end
+
+--- Livestock in the stable, once. Purely a bonus: a failure here must never
+--- stop the deck from finishing.
 function B.stockAnimals(deck)
+    local s = U.state()
+    if s.animalsStocked then return 0 end
     if not addAnimal or not AnimalDefinitions then
         U.warnOnce("animals", "animal API unavailable; livestock skipped")
         return 0
     end
+    local spots = roomSquares(deck, "Stable")
+    if #spots == 0 then return 0 end
     -- Animal types are per sex in build 42 (hen and cockerel, ewe and ram),
     -- not one entry per species.
     local wanted = {
@@ -1025,32 +647,81 @@ function B.stockAnimals(deck)
     local spawn = U.batch("animals.add")
     for _, spec in ipairs(wanted) do
         local kind, count = spec[1], spec[2]
-        local def = U.try("animalDef:" .. kind, function()
-            return AnimalDefinitions.getDef(kind)
+        local def = U.try("animalDef:" .. kind, function() return AnimalDefinitions.getDef(kind) end)
+        local breed = def and U.try("animalBreed:" .. kind, function()
+            local all = def:getBreeds()
+            if all and all:size() > 0 then return all:get(0) end
+            return nil
         end)
-        if def then
-            -- Breed names differ per species, so take whichever the
-            -- definition lists first rather than guessing at names.
-            local breed = U.try("animalBreed:" .. kind, function()
-                local all = def:getBreeds()
-                if all and all:size() > 0 then return all:get(0) end
-                return nil
-            end)
-            if breed then
-                for _ = 1, count do
-                    local x, y = at(deck, 17 + (made % 5), 18 + math.floor(made / 5))
-                    local ok = spawn(function()
-                        local a = addAnimal(U.cell(), x, y, deck.z, kind, breed)
-                        if a then a:addToWorld() end
-                        return a
-                    end)
-                    if ok then made = made + 1 end
+        if breed then
+            for _ = 1, count do
+                local p = spots[((made * 7) % #spots) + 1]
+                local x, y = at(deck, p[1], p[2])
+                if spawn(function()
+                    local a = addAnimal(U.cell(), x, y, deck.z, kind, breed)
+                    if a then a:addToWorld() end
+                    return a
+                end) then made = made + 1 end
+            end
+        end
+    end
+    s.animalsStocked = true
+    U.debug("spawned %d animals", made)
+    return made
+end
+
+---------------------------------------------------------------------------
+-- Lighting and power
+---------------------------------------------------------------------------
+--- Marks the footprint as powered indoor space.
+local function powerDeck(deck)
+    local lay = layoutOf(deck)
+    local power = U.batch("power.setHaveElectricity")
+    for ox = 0, lay.w do
+        for oy = 0, lay.h do
+            local x, y = at(deck, ox, oy)
+            local sq = U.square(x, y, deck.z, false)
+            if sq then power(function() sq:setHaveElectricity(true) end) end
+        end
+    end
+end
+
+-- Local light sources, hung for the deck the player is on at the layout's
+-- lamp spots (a lamp in the middle of every room, and more until every
+-- square is within three of one). Lampposts are not saved and the engine
+-- drops them outside the loaded area, so they are hung again whenever one is
+-- missing -- which is also what makes the ship lit after a reload.
+local lamps = {}        -- "deck,x,y" -> IsoLightSource
+local lampCheck = 0
+
+function B.lightDeck(index)
+    local deck = C.Decks[index]
+    local lay = layoutOf(deck)
+    local cell = U.cell()
+    if not lay or not cell then return end
+    lampCheck = lampCheck + 1
+    if lampCheck >= 10 then
+        lampCheck = 0
+        local list = U.try("light.list", function() return cell:getLamppostPositions() end)
+        if list then
+            for key, light in pairs(lamps) do
+                if U.try("light.contains", function() return list:contains(light) end) ~= true then
+                    lamps[key] = nil
                 end
             end
         end
     end
-    U.debug("spawned %d animals", made)
-    return made
+    local c = C.DeckLight
+    local hang = U.batch("light.addLamppost")
+    for _, p in ipairs(lay.lamps) do
+        local key = deck.id .. "," .. p[1] .. "," .. p[2]
+        if not lamps[key] then
+            local x, y = at(deck, p[1], p[2])
+            if U.chunkLoaded(x, y, deck.z) then
+                lamps[key] = hang(function() return cell:addLamppost(x, y, deck.z, c[1], c[2], c[3], c[4]) end)
+            end
+        end
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -1060,11 +731,12 @@ end
 --- touch an orphan square. Chunks only stream around a player, so this stays
 --- false until somebody is standing in the interior.
 function B.deckReady(deck)
-    local size = C.RoomSize
+    local lay = layoutOf(deck)
+    if not lay then return false end
     local probes = {
-        { 0, 0 }, { size, 0 }, { 0, size }, { size, size },
-        { math.floor(size / 2), math.floor(size / 2) },
-        { C.Landing.x, C.Landing.y },
+        { -1, -1 }, { lay.w + 1, -1 }, { -1, lay.h + 1 }, { lay.w + 1, lay.h + 1 },
+        { math.floor(lay.w / 2), math.floor(lay.h / 2) },
+        { lay.landing.x, lay.landing.y },
     }
     for _, p in ipairs(probes) do
         local x, y = at(deck, p[1], p[2])
@@ -1073,41 +745,82 @@ function B.deckReady(deck)
     return true
 end
 
+--- True when a deck was last built by the old hand-placed generator.
+local function builtByOldGenerator(index)
+    local s = U.state()
+    local key = tostring(index)
+    if not s.builtDecks[key] then return false end
+    local rev = (s.deckRev or {})[key]
+    return rev == nil or rev < C.LayoutRev
+end
+
 --- Builds one deck by index (1 is the console room). Idempotent: every step
---- checks for what it would add before adding it. Returns false, and builds
---- nothing, while the deck footprint is still streaming in.
+--- looks before it adds. Returns false, and builds nothing, while the deck
+--- footprint is still streaming in.
 function B.buildDeck(index)
     local deck = C.Decks[index]
-    if not deck then return false end
-
+    local lay = layoutOf(deck)
+    if not lay then return false end
     if not B.deckReady(deck) then
         U.debug("deck %d (%s) not streamed in yet", index, deck.id)
         return false
     end
 
-    U.debug("building deck %d (%s) at z=%d col=%d", index, deck.id, deck.z, deck.col)
     local s = U.state()
+    local salvage = {}
+    local legacy = builtByOldGenerator(index)
+    if legacy then s.kitPacked = true end      -- the old console had the kit
+    local made = {}
+    local counts = { placed = 0 }
 
-    -- Order matters. The footprint is stripped and floored first so a player
-    -- standing here has ground under them as early as possible; clearing the
-    -- surrounding void is left until last. Every phase is isolated, so one
-    -- failing step cannot leave a deck half-built with the player in mid-air.
+    -- Order matters. The floor goes down first so a player standing here has
+    -- ground under them as early as possible; clearing the surrounding void
+    -- is left until last. Every phase is isolated, so one failing step cannot
+    -- leave a deck half-built with the player in mid-air.
     local phases = {
-        { "purgeLegacy",    function() if index == 1 then purgeLegacyStack() end end },
-        { "clearFootprint", function() clearFootprint(deck) end },
-        { "buildFloor",     function() buildFloor(deck) end },
-        { "buildWalls",     function() buildWalls(deck) end },
-        { "powerDeck",      function() powerDeck(deck) end },
-        { "lightDeck",      function() lightDeck(deck) end },
-        -- Before furnishing, not after: furnish puts the basin back on the
-        -- counter square where it belongs.
-        { "stripLegacy",    function() stripLegacy(deck) end },
-        { "furnish",        function()
-                                U.resetStockCursors()
-                                local dress = furnish[deck.id]
-                                if dress then dress(deck) end
-                            end },
-        { "clearMargin",    function() clearSurroundings(deck) end },
+        { "purgeLegacy", function() if index == 1 then purgeLegacyStack() end end },
+        { "refit",       function() if legacy then refitLegacy(deck, salvage) end end },
+        { "stale",       function() if not legacy then stripStale(deck, lay, salvage) end end },
+        { "floors",      function() layFloors(deck, lay) end },
+        { "objects",     function()
+            for _, o in ipairs(lay.objects) do
+                local x, y = at(deck, o[1], o[2])
+                local sq = U.square(x, y, deck.z, true)
+                if sq and not standing(sq, o) then
+                    local obj = make(sq, o)
+                    if obj then
+                        counts.placed = counts.placed + 1
+                        if o[4] == "c" then table.insert(made, { obj = obj, piece = o[5], sq = sq }) end
+                    end
+                end
+            end
+        end },
+        { "power",       function() powerDeck(deck) end },
+        { "handBack",    function()
+            -- Salvage goes into the new containers first; the ones it fills
+            -- are the player's own things again and are not stocked on top.
+            if #salvage == 0 then return end
+            local into = {}
+            for _, m in ipairs(made) do
+                if not C.HoldPieces[m.piece] or legacy then
+                    local c = U.containerOf(m.obj)
+                    if c then table.insert(into, c) end
+                end
+            end
+            handBack(deck, salvage, into)
+            local rest = {}
+            for _, m in ipairs(made) do
+                if not holdsAnything(m.obj) then table.insert(rest, m) end
+            end
+            made = rest
+        end },
+        { "stock",       function() U.resetStockCursors(); stockDeck(deck, made) end },
+        { "garden",      function()
+            if lay.beds then B.sowPlots(deck) end
+            if deck.id == "growing" then B.stockAnimals(deck) end
+        end },
+        { "light",       function() B.lightDeck(index) end },
+        { "clearMargin", function() clearSurroundings(deck) end },
     }
     for _, phase in ipairs(phases) do
         U.try(phase[1] .. ":" .. deck.id, phase[2])
@@ -1116,40 +829,39 @@ function B.buildDeck(index)
     s.builtDecks[tostring(index)] = true
     s.deckRev = s.deckRev or {}
     s.deckRev[tostring(index)] = C.BuildRev
-    U.log("deck %d (%s) ready at z=%d", index, deck.name, deck.z)
+    s.layoutRev = s.layoutRev or {}
+    s.layoutRev[tostring(index)] = L.rev
+    U.log("deck %d (%s) ready at z=%d: %d placed, %d containers stocked",
+          index, deck.name, deck.z, counts.placed, #made)
     return true
 end
 
---- True when a deck exists and was generated by the current revision.
+--- True when a deck exists and was generated from the current layout.
 function B.deckCurrent(index)
     local s = U.state()
     local key = tostring(index)
     return s.builtDecks[key] == true and (s.deckRev or {})[key] == C.BuildRev
+       and (s.layoutRev or {})[key] == L.rev
 end
 
---- Builds a deck once and remembers it, and rebuilds one that was generated
---- by an older revision of the mod. Safe to call every time a player arrives.
+--- Builds a deck once and remembers it, and brings up to date one that was
+--- generated from an older layout. Safe to call every time a player arrives.
 function B.ensureDeck(index)
+    if B.deckCurrent(index) then return false end
     local s = U.state()
-    s.deckRev = s.deckRev or {}
     local key = tostring(index)
-    if s.builtDecks[key] and s.deckRev[key] == C.BuildRev then
-        return false
-    end
     -- ensureDeck is called on every arrival tick while the chunks stream in,
     -- so say this once rather than once per frame.
     if s.builtDecks[key] and not B.upgradeNoted[key] then
         B.upgradeNoted[key] = true
-        U.log("deck %d was built by an older revision; bringing it up to date", index)
+        U.log("deck %d was built from an older layout; bringing it up to date", index)
     end
     return B.buildDeck(index)
 end
 
 --- Forces a full rebuild of every deck; used by the self-test.
 function B.buildAll()
-    for i = 1, #C.Decks do
-        B.buildDeck(i)
-    end
+    for i = 1, #C.Decks do B.buildDeck(i) end
     return true
 end
 
@@ -1188,7 +900,6 @@ function B.forceRebuild(index)
             local x, y = at(deck, ox, oy)
             local sq = U.square(x, y, deck.z, false)
             if sq then
-                -- clear everything this time, our own work included
                 local doomed = {}
                 U.eachObject(sq, function(o) table.insert(doomed, o) end)
                 for _, o in ipairs(doomed) do
@@ -1203,12 +914,9 @@ function B.forceRebuild(index)
     local s = U.state()
     s.builtDecks[tostring(index)] = nil
     if s.deckRev then s.deckRev[tostring(index)] = nil end
-
-    local wasDev = C.DevRestock
-    C.DevRestock = true
+    if s.layoutRev then s.layoutRev[tostring(index)] = nil end
+    if index == 1 then s.kitPacked = nil end
     local ok = B.buildDeck(index)
-    C.DevRestock = wasDev
-
     U.log("forceRebuild: wiped %d objects and regenerated %s", wiped, deck.name)
     U.teleport(player, B.arrivalSpot(deck))
     return ok

@@ -1,11 +1,11 @@
 --[[ TARDIS -- shared configuration.
 
     Everything the mod hard-codes about the world lives here: where the
-    interior is parked, how a deck is laid out, which sprites dress it and
-    what gets stocked into the containers.
+    interior is parked, which decks there are, and what gets stocked into
+    the containers. The decks themselves -- every wall, door and fitting --
+    are TARDIS_Layout.lua, generated from BuildingEd (INTERIOR.md).
 
-    Sprite names come from media/newtiledefinitions.tiles.txt and item ids
-    from media/scripts/generated/items/, both for build 42.20.
+    Item ids come from media/scripts/generated/items/ for build 42.20.
 ]]
 
 TARDIS = TARDIS or {}
@@ -13,15 +13,16 @@ TARDIS = TARDIS or {}
 local C = {}
 TARDIS.Config = C
 
-C.Version   = "1.9.3"
+C.Version   = "2.0.0"
 C.StateKey  = "TARDIS_State_v1"
 C.ModPrefix = "[TARDIS]"
 
--- Bumped whenever a deck needs rebuilding to pick up changes to the way decks
--- are generated. Decks built at an older revision are quietly brought up to
--- date the next time the player stands on them; the rebuild preserves
--- furniture, stored items and crops.
-C.BuildRev = 15
+-- Bumped whenever the builder changes in a way every deck needs. A deck is
+-- also brought up to date whenever its layout changes (TARDIS_Layout's
+-- L.rev), the next time the player stands on it; the update preserves
+-- furniture, stored items and crops. Revision 16 is the first built from
+-- TARDIS_Layout (C.LayoutRev).
+C.BuildRev = 16
 
 -- Radius, in tiles, of the field that holds the dead back from the doors.
 C.FieldRadius = 10
@@ -29,12 +30,6 @@ C.FieldRadius = 10
 -- Flip to true for verbose build logging in console.txt.
 C.Debug = false
 
--- Design-time only. Normally a rebuild leaves every container exactly as the
--- player left it -- a ship in play is meant to be lived in, and what gets
--- eaten stays eaten. With this on, a rebuild restocks as well, which is what
--- you want while iterating on loot lists and what you never want in a world
--- somebody is playing. TARDIS_Rebuild() turns it on for one deck instead.
-C.DevRestock = false
 
 ---------------------------------------------------------------------------
 -- Where the interior lives
@@ -68,20 +63,6 @@ C.DeckSpacing = 80
 -- nothing, which renders as black void around the ship.
 C.ClearMargin = 24
 
--- Where a player is put down when they arrive on a deck. Decks are joined
--- through the right-click menu, so no stairwell or vestibule is needed and
--- the hall is left open.
---
--- The square and its immediate neighbours are kept clear of furniture, so
--- arriving never drops anyone inside a bookcase.
-C.Landing = { x = 12, y = 19, clearance = 1 }
-
---- True for the landing square and the ring of squares around it.
-function C.isLanding(ox, oy)
-    return math.abs(ox - C.Landing.x) <= C.Landing.clearance
-       and math.abs(oy - C.Landing.y) <= C.Landing.clearance
-end
-
 ---------------------------------------------------------------------------
 -- Decks, top to bottom
 ---------------------------------------------------------------------------
@@ -91,192 +72,50 @@ C.TopZ = 5
 -- col is the sideways step; z is the storey. Both descend together, so the
 -- bottom deck sits on the ground at z 0 and the console room is five storeys
 -- up, each one its own island.
+--
+-- What is *on* each deck -- rooms, walls, doors, floors, every fitting, where
+-- a player lands and where the lamps hang -- is data, generated from the
+-- BuildingEd files in design/buildinged/ into TARDIS_Layout.lua
+-- (INTERIOR.md). Nothing here places anything.
 C.Decks = {
-    { id = "console", z = 5, col = 0, name = "Console Room",
-      floor = "floors_interior_tilesandwood_01_24" },
-    { id = "housing", z = 4, col = 1, name = "Habitation Deck",
-      floor = "floors_interior_carpet_01_0" },
-    { id = "storage", z = 3, col = 2, name = "Stores Deck",
-      floor = "floors_interior_tilesandwood_01_20" },
-    { id = "library", z = 2, col = 3, name = "Library Deck",
-      floor = "floors_interior_tilesandwood_01_13" },
-    { id = "galley",  z = 1, col = 4, name = "Galley Deck",
-      floor = "floors_interior_tilesandwood_01_5" },
-    { id = "growing", z = 0, col = 5, name = "Hydroponics Deck",
-      floor = "floors_exterior_natural_01_0" },
+    { id = "console", z = 5, col = 0, name = "Console Room" },
+    { id = "housing", z = 4, col = 1, name = "Habitation Deck" },
+    { id = "storage", z = 3, col = 2, name = "Stores Deck" },
+    { id = "library", z = 2, col = 3, name = "Library Deck" },
+    { id = "galley",  z = 1, col = 4, name = "Galley Deck" },
+    { id = "growing", z = 0, col = 5, name = "Gardens" },
 }
 
 -- Positions are resolved in TARDIS_Util, which knows the engine cell size.
 
----------------------------------------------------------------------------
--- Room shape
----------------------------------------------------------------------------
--- Project Zomboid has no diagonal wall sprites -- walls only ever sit on the
--- north or west edge of a square -- so a smooth hexagon or circle is not
--- available. What is available is a stepped chamfer: cut the corners off the
--- square footprint and let the wall follow the steps. At this size and at the
--- game's camera angle that reads clearly as an octagon, which is the shape
--- the console room wants.
---
--- Shapes: "rect", "octagon", "hexagon". Walls are derived from whichever
--- squares the shape includes, so a new shape needs no other changes.
-C.Shape = "octagon"
+-- The first revision built from TARDIS_Layout. A deck stamped with anything
+-- older was generated by the hand-placed octagonal builder, and is cleared
+-- and refitted once (TARDIS_Build, refitLegacy) rather than rebuilt over.
+C.LayoutRev = 16
 
--- How deep to cut each corner, in squares. Bigger is rounder; past about a
--- third of RoomSize the room stops being usefully square anywhere.
-C.Chamfer = 7
-
---- True when an offset is inside the deck floor plan.
-function C.inShape(ox, oy, shape, size, chamfer)
-    shape = shape or C.Shape
-    size = size or C.RoomSize
-    chamfer = chamfer or C.Chamfer
-    if ox < 0 or oy < 0 or ox > size or oy > size then return false end
-
-    if shape == "rect" then
-        return true
-    elseif shape == "octagon" then
-        -- cut a right triangle off each corner
-        return (ox + oy) >= chamfer
-           and (ox + (size - oy)) >= chamfer
-           and ((size - ox) + oy) >= chamfer
-           and ((size - ox) + (size - oy)) >= chamfer
-    elseif shape == "hexagon" then
-        -- points east and west, flat north and south
-        local half = size / 2
-        local taper = math.abs(oy - half) * (chamfer / half)
-        return ox >= taper and ox <= size - taper
-    end
-    return true
-end
-
----------------------------------------------------------------------------
--- Multi-tile furniture
----------------------------------------------------------------------------
--- A bed, wardrobe or desk covers more than one square, and which half goes
--- where is not guessable: it comes from the tileset's SpriteGridPos property,
--- given here as {sprite, dx, dy}. Getting this backwards is what made the
--- bunks look mismatched -- the foot of each bed was laid at its head.
--- tests/test_layout.py checks every offset here against the game data.
-C.Pieces = {
-    bedS      = { { "furniture_bedding_01_9",  0, 0 }, { "furniture_bedding_01_8",  0, 1 } },
-    bedE      = { { "furniture_bedding_01_10", 0, 0 }, { "furniture_bedding_01_11", 1, 0 } },
-    bedFancyS = { { "furniture_bedding_01_1",  0, 0 }, { "furniture_bedding_01_0",  0, 1 } },
-    bunkS     = { { "furniture_bedding_01_85", 0, 0 }, { "furniture_bedding_01_84", 0, 1 } },
-    wardrobeS = { { "furniture_storage_01_2",  0, 0 }, { "furniture_storage_01_3",  1, 0 } },
-    wardrobeE = { { "furniture_storage_01_1",  0, 0 }, { "furniture_storage_01_0",  0, 1 } },
-    deskS     = { { "furniture_tables_high_01_26", 0, 0 }, { "furniture_tables_high_01_27", 1, 0 } },
-    deskE     = { { "furniture_tables_high_01_25", 0, 0 }, { "furniture_tables_high_01_24", 0, 1 } },
-}
-
----------------------------------------------------------------------------
--- Sprites
----------------------------------------------------------------------------
-C.Sprites = {
-    -- walls: index 0 is the west face, 1 the north face, 2 the corner post
-    wallW   = "walls_interior_house_01_0",
-    wallN   = "walls_interior_house_01_1",
-    wallC   = "walls_interior_house_01_2",
-
-    -- the player-built wooden staircase, the set the carpentry menu uses
-    stairW  = { "carpentry_02_88", "carpentry_02_89", "carpentry_02_90" },
-    stairN  = { "carpentry_02_96", "carpentry_02_97", "carpentry_02_98" },
-    pillarW = "carpentry_02_94",
-    pillarN = "carpentry_02_95",
-
-    lamp    = { S = "lighting_indoor_01_32", E = "lighting_indoor_01_8",
-                W = "lighting_indoor_01_40", N = "lighting_indoor_01_48" },
-
-    -- Two different things, and the difference matters.
-    --
-    -- `sink` is a pedestal sink: a whole fixture that stands on the floor,
-    -- which is what a wet block wants. `sinkBasin` is a counter basin -- 35x20
-    -- of art drawn at counter height with nothing underneath it -- which is
-    -- what a kitchen wants, on a counter square.
-    --
-    -- The mod used the basin for both, standing on bare floor, and a basin
-    -- with no counter under it hangs over the square behind and reads as a
-    -- sink sunk into the floor. Rendering both out of Tiles2x.pack against a
-    -- floor tile is what settled it; see U.addObject.
-    sink      = { N = "fixtures_sinks_01_28", E = "fixtures_sinks_01_13",
-                  S = "fixtures_sinks_01_12", W = "fixtures_sinks_01_29" },
-    sinkBasin = { N = "fixtures_sinks_01_0",  E = "fixtures_sinks_01_1",
-                  S = "fixtures_sinks_01_2",  W = "fixtures_sinks_01_3" },
-    toilet  = { S = "fixtures_bathroom_01_0", E = "fixtures_bathroom_01_1",
-                W = "fixtures_bathroom_01_2", N = "fixtures_bathroom_01_3" },
-    shower  = { N = "fixtures_bathroom_01_22", W = "fixtures_bathroom_01_23" },
-
-    -- console-room dressing, from the sets the show actually used: a chair,
-    -- a scanner, a ship's radio, a clock, chests and shelves round the walls
-    chair    = { E = "furniture_seating_indoor_01_8", S = "furniture_seating_indoor_01_9",
-                 W = "furniture_seating_indoor_01_10", N = "furniture_seating_indoor_01_11" },
-    scanner  = { E = "appliances_television_01_8", S = "appliances_television_01_9",
-                 W = "appliances_television_01_10", N = "appliances_television_01_11" },
-    radio    = { S = "appliances_radio_01_8", E = "appliances_radio_01_9",
-                 N = "appliances_radio_01_10", W = "appliances_radio_01_11" },
-    clock    = { E = "walls_decoration_01_104", S = "walls_decoration_01_105",
-                 N = "walls_decoration_01_106", W = "walls_decoration_01_107" },
-    chest    = { S = "furniture_storage_02_28", E = "furniture_storage_02_29",
-                 N = "furniture_storage_02_30", W = "furniture_storage_02_31" },
-    rug      = "floors_rugs_01_16",
-    microwave = { S = "appliances_cooking_01_25", E = "appliances_cooking_01_24",
-                  W = "appliances_cooking_01_26", N = "appliances_cooking_01_27" },
-
-    metalShelf = { S = "furniture_shelving_01_28", E = "furniture_shelving_01_29",
-                   W = "furniture_shelving_01_30", N = "furniture_shelving_01_31" },
-    bookShelf  = { S = "furniture_shelving_01_1", E = "furniture_shelving_01_2",
-                   W = "furniture_shelving_01_3", N = "furniture_shelving_01_4" },
-    magShelf   = { S = "location_shop_generic_01_24", E = "location_shop_generic_01_26",
-                   W = "location_shop_generic_01_104", N = "location_shop_generic_01_106" },
-    locker     = { S = "furniture_storage_02_8", E = "furniture_storage_02_9",
-                   N = "furniture_storage_02_10", W = "furniture_storage_02_11" },
-    crate      = "location_military_generic_01_0",
-    counter    = { N = "carpentry_02_17", E = "carpentry_02_19" },
-    fridge     = { S = "appliances_refrigeration_01_0", E = "appliances_refrigeration_01_1",
-                   N = "appliances_refrigeration_01_2", W = "appliances_refrigeration_01_3" },
-    oven       = { E = "appliances_cooking_01_0", S = "appliances_cooking_01_1",
-                   W = "appliances_cooking_01_2", N = "appliances_cooking_01_3" },
-}
+-- Light for the deck lamps (TARDIS_Layout's `lamps`): r, g, b, radius. The
+-- warm white of the console room's roundels.
+C.DeckLight = { 1.0, 0.94, 0.82, 9 }
 
 ---------------------------------------------------------------------------
 -- Items placed in the interior
 ---------------------------------------------------------------------------
--- The exterior shell and the control console are world models, defined in
--- media/scripts/tardis.txt.
+-- The exterior shell is a world model, defined in media/scripts/tardis.txt.
 C.ExteriorItem = "TARDIS.TARDISPoliceBox"
 
--- The console is a container item, so the model in the middle of the control
--- room opens like a crate: 500 units of hold, declared in tardis.txt and
--- stocked once, when it is first put down, from C.ConsoleKit below.
---
--- It is a different id from the console every world before revision 11 had.
--- The old one was a plain item, and an item saved as one class and reloaded
--- as another reads a container section that was never written to the save.
--- Build lifts the legacy console out and drops this one in its place instead;
--- the old id stays declared so an existing world can still resolve it long
--- enough to be swapped.
+-- The console used to be a world item that opened like a crate. It is a
+-- tile now -- the hexagonal console on the layout's `console` piece -- and
+-- is itself a container, the head of the hold. Both old ids stay declared
+-- in tardis.txt so a world that still has one can load it long enough for
+-- the refit to lift it out and hand its contents to the hold.
 C.ConsoleItem       = "TARDIS.TARDISConsoleUnit"
 C.LegacyConsoleItem = "TARDIS.TARDISConsole"
 
--- The hold, which is the console plus a ring of crates around it.
---
--- **A container cannot be made bigger than the engine allows**, and the two
--- ceilings are different. `ItemContainer.getCapacity()` returns
--- min(capacity, 50) when the container belongs to an item and
--- min(capacity, 100) when it belongs to a world object, and
--- `InventoryContainer.getCapacity()` clamps an item's again to 50 minus the
--- item's own weight. So the console itself can never carry more than 49, and
--- the way to a hold worth the name is more containers rather than a bigger
--- one: six crates at 100 apiece, on the rug around the console.
---
--- The spots leave the four squares orthogonally next to the console clear, so
--- the console is still walkable up to from any side.
-C.ConsoleHold = {
-    capacity = 100,
-    name     = "TARDIS Hold",
-    spots    = { { 11, 11 }, { 13, 11 }, { 11, 13 }, { 13, 13 },
-                 { 10, 12 }, { 14, 12 } },
-}
+-- The hold: the console and the roundel lockers of the console room, a
+-- hundred apiece (a world object's container is capped at 100 by the engine,
+-- ItemContainer.getCapacity). C.ConsoleKit is packed across them, in order,
+-- the first time the console room is built.
+C.HoldPieces = { console = true, hold_locker = true }
 
 ---------------------------------------------------------------------------
 -- The sonic screwdriver
@@ -313,10 +152,7 @@ C.SonicJumpStart = true
 -- often than this many ticks apart, so standing still is nearly free.
 C.SonicInterval = 120
 
--- Where the case of screwdrivers sits in the console room, and how many are
--- in it. Just east of the console, off the rug and in plain sight of anyone
--- walking up from the landing.
-C.SonicBox   = { x = 15, y = 12 }
+-- How many screwdrivers the sonic case beside the console doors holds.
 C.SonicCount = 3
 
 C.Loot = {}
@@ -488,11 +324,10 @@ appendTo(C.Loot.gunAmmo, C.Loot.pistolAmmo, C.Loot.rifleAmmo)
 -- own store -- the thing you open before stepping out somewhere bad -- so it
 -- is deliberately generous and deliberately finite.
 --
--- The hold takes 500 weight units. This list is 679 items and 395 of them,
--- which leaves room for the player to put their own things in. Anything past
--- the capacity would be dropped in silence, so if you add to this, take
--- something out: U.stockKit reads the hold back afterwards and logs whatever
--- did not fit.
+-- The hold is the console and six roundel lockers, a hundred apiece. This
+-- list is 679 items and 395 of weight, packed across them in order by
+-- TARDIS_Build (packKit), which leaves room for the player's own things.
+-- The kit is read back afterwards and anything that did not land is logged.
 --
 -- Weights, for arithmetic: a canned good is 0.8, a carton of 5.56 is 5, of
 -- 9mm 8, of .44 12; bandages and pills are 0.1 to 0.2; rice and pasta are 2.
@@ -580,6 +415,61 @@ C.Loot.magazines = {
 }
 
 C.Loot.linen = { "Base.Sheet", "Base.Pillow" }
+
+-- The Wardrobe: long coats, jumpers, a fedora and every stripe of scarf.
+C.Loot.wardrobe = {
+    "Base.Scarf_StripeRedWhite", "Base.Scarf_StripeBlueWhite", "Base.Scarf_StripeBlackWhite",
+    "Base.Hat_Fedora", "Base.Jacket_LeatherBrown", "Base.Jacket_LeatherBlack",
+    "Base.Jacket_NavyBlue", "Base.Jumper_PoloNeck", "Base.Jumper_VNeck",
+    "Base.Shirt_FormalWhite", "Base.Jacket_Padded", "Base.Jacket_Black",
+    "Base.Tie_BowTieFull", "Base.Trousers_Suit", "Base.Suit_Jacket", "Base.Shoes_Black",
+}
+
+---------------------------------------------------------------------------
+-- What each fitting holds
+---------------------------------------------------------------------------
+-- By the piece a container is part of (TARDIS_Layout, the fifth field of an
+-- object), and the deck it is on: C.Stock[deck][piece] first, then
+-- C.Stock.any[piece]. `loot` names a C.Loot list ("books" is every volume of
+-- every skill book, built in TARDIS_Build); `amount` is how many picks from
+-- it, and consecutive containers carry on through a list rather than all
+-- starting at its top (U.stock). `cycle` hands each container of that piece
+-- on the deck the next list in turn, so a storeroom's shelves alternate.
+--
+-- The armouries, the hold and the sonic case are packed rather than seeded,
+-- and are handled by name in TARDIS_Build: see ARMOURY there.
+C.Stock = {
+    any = {
+        bookcase        = { loot = "magazines", amount = 6 },
+        gramophone      = { loot = "media", amount = 6 },
+        pantry_dresser  = { loot = "food", amount = 10 },
+        kitchen_counter = { loot = "cookware", amount = 4 },
+        kitchen_sink    = { loot = "cookware", amount = 2 },
+        fridge          = { loot = "food", amount = 12 },
+        nightstand      = { loot = "linen", amount = 3 },
+        wardrobe        = { loot = "linen", amount = 6 },
+        clothes_rail    = { loot = "wardrobe", amount = 8 },
+        writing_desk    = { loot = "magazines", amount = 4 },
+        store_shelf     = { cycle = { "tools", "medical", "tools", "linen" }, amount = 10 },
+        tool_locker     = { loot = "tools", amount = 10 },
+        workbench       = { loot = "tools", amount = 8 },
+        medical_cabinet = { loot = "medical", amount = 10 },
+        seed_cabinet    = { loot = "seeds", amount = 10 },
+        potting_bench   = { loot = "seeds", amount = 6 },
+    },
+    library = {
+        bookcase = { loot = "books", amount = 8 },
+    },
+    housing = {
+        wardrobe = { loot = "wardrobe", amount = 6 },
+    },
+    galley = {
+        store_shelf = { loot = "food", amount = 10 },
+    },
+    growing = {
+        store_shelf = { loot = "seeds", amount = 8 },
+    },
+}
 
 ---------------------------------------------------------------------------
 -- Crops sown on the hydroponics deck

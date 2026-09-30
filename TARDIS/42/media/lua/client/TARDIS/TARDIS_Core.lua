@@ -445,9 +445,8 @@ function Core.deckIndexOf(player)
     return index
 end
 
---- Menu shortcut for the staircase. The generated flights are real stairs,
---- but this also guarantees the silo stays navigable while a deck is still
---- being raised.
+--- Moves the player a deck up or down, from the right-click menu: decks are
+--- joined through the menu, not by walking.
 function Core.changeDeck(player, delta)
     local index = Core.deckIndexOf(player)
     if not index then return false end
@@ -459,7 +458,8 @@ end
 ---------------------------------------------------------------------------
 -- Upkeep
 ---------------------------------------------------------------------------
---- Sinks and taps inside the ship never run dry.
+--- Sinks, baths and troughs inside the ship never run dry: every fitting
+--- whose piece the layout marks `water` is topped up to its store.
 function Core.refillWater()
     local s = U.state()
     local count = 0
@@ -474,7 +474,8 @@ function Core.refillWater()
                         U.eachObject(sq, function(o)
                             local md = o:getModData()
                             local tag = md and md.TARDIS
-                            if tag == "sink" or tag == "shower" or tag == "toilet" then
+                            local use = tag and TARDIS.Layout.uses[tag]
+                            if use and use.water then
                                 U.try("refill", function()
                                     local cap = o:getFluidCapacity()
                                     if cap and cap > 0 then
@@ -563,6 +564,10 @@ local function onPlayerUpdate(player)
         Core.beginArrival(player, index, false)
         return
     end
+
+    -- The deck's lamps, hung again whenever the engine has dropped one --
+    -- lampposts are not saved, so this is also what lights a reloaded ship.
+    TARDIS.Build.lightDeck(index)
 
     -- Built, but the player is over a hole with nothing under them.
     local sq = U.square(player:getX(), player:getY(), math.floor(player:getZ()), false)

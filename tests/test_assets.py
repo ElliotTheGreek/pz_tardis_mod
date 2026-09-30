@@ -11,6 +11,30 @@ CATALOG = os.path.join(ROOT, "tools", "_catalog")
 MOD = os.path.join(ROOT, "TARDIS", "42")
 
 tiles = set(json.load(open(os.path.join(CATALOG, "tiles.json")))["tiles"])
+
+# The mod's own tiles: known when the tiledef defines them. The pack, the
+# tiledef and mod.info's two lines naming them all have to agree, or the
+# whole interior is empty squares and nothing in any log.
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import gen_tardis_pack as PACK  # noqa: E402
+mod_tile_problems = []
+_info = open(os.path.join(MOD, "mod.info"), encoding="utf-8").read()
+if not re.search(r"^pack=%s\s*$" % PACK.PACK_NAME, _info, re.M):
+    mod_tile_problems.append("mod.info has no pack=%s line" % PACK.PACK_NAME)
+if not re.search(r"^tiledef=%s %d\s*$" % (PACK.PACK_NAME, PACK.TILEDEF_NUMBER), _info, re.M):
+    mod_tile_problems.append("mod.info has no tiledef=%s %d line" % (PACK.PACK_NAME, PACK.TILEDEF_NUMBER))
+for _p in (PACK.PACK, PACK.TILES):
+    if not os.path.exists(_p):
+        mod_tile_problems.append("%s is missing: run tools/gen_tardis_pack.py" % _p)
+if not mod_tile_problems:
+    _packed = {e[0] for pg in PACK.read_pack(PACK.PACK) for e in pg["entries"]}
+    for _sheet, _ts in PACK.read_tiledefs(PACK.TILES).items():
+        for _i, _props in enumerate(_ts["tiles"]):
+            if _props:
+                _name = "%s_%d" % (_sheet, _i)
+                tiles.add(_name)
+                if _name not in _packed:
+                    mod_tile_problems.append("%s is defined but not in the texture pack" % _name)
 items = set(json.load(open(os.path.join(CATALOG, "items.json")))["Base"])
 
 # a tile sprite looks like  some_tileset_name_01_42
@@ -26,7 +50,7 @@ script = open(os.path.join(MOD, "media", "scripts", "tardis.txt"),
 mod_items = set(re.findall(r"^\s*item\s+([A-Za-z0-9_]+)", script, re.M))
 mod_icons = set(re.findall(r"^\s*Icon\s*=\s*([A-Za-z0-9_]+)\s*,", script, re.M))
 
-failures, checked_sprites, checked_items = [], 0, 0
+failures, checked_sprites, checked_items = list(mod_tile_problems), 0, 0
 
 # Clothing items are resolved by GUID through media/fileGuidTable.xml. A
 # clothing XML with no entry there loads as nothing at all, silently: the item

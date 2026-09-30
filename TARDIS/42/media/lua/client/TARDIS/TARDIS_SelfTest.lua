@@ -12,6 +12,7 @@
 
 require "TARDIS/TARDIS_Config"
 require "TARDIS/TARDIS_Util"
+require "TARDIS/TARDIS_Layout"
 
 TARDIS = TARDIS or {}
 local C = TARDIS.Config
@@ -45,40 +46,49 @@ end
 ---------------------------------------------------------------------------
 -- Checks used by the steps
 ---------------------------------------------------------------------------
+--- Every piece of the deck, read back. A sprite that does not land leaves an
+--- empty square and no error anywhere, so the layout is walked and each entry
+--- looked for on its square -- doors by being ours on that edge, since an
+--- open door wears a different sprite.
 local function checkDeckShell(index)
     local deck = C.Decks[index]
+    local lay = TARDIS.Build.layoutOf(deck)
     local rx, ry = U.deckOrigin(deck)
     local id = deck.id
 
-    -- Only sample squares the floor plan actually includes: the chamfered
-    -- corners of an octagonal deck are meant to be empty.
-    local missing, sampled = 0, 0
-    for ox = 1, C.RoomSize - 1, 2 do
-        for oy = 1, C.RoomSize - 1, 2 do
-            if C.inShape(ox, oy, deck.shape, C.RoomSize, deck.chamfer) then
-                sampled = sampled + 1
-                local sq = U.square(rx + ox, ry + oy, deck.z, false)
-                if not sq or not sq:getFloor() then missing = missing + 1 end
-            end
-        end
+    local missing = 0
+    for _, f in ipairs(lay.floors) do
+        local sq = U.square(rx + f[1], ry + f[2], deck.z, false)
+        if not sq or not sq:getFloor() then missing = missing + 1 end
     end
     check("deck." .. id .. ".floor", missing == 0,
-          missing .. " of " .. sampled .. " in-shape squares lack floor")
+          missing .. " of " .. #lay.floors .. " layout squares lack floor")
 
-    -- Walk east along the middle row to the first square inside the room;
-    -- its west edge is the west wall, wherever the chamfer put it.
-    local wallOK = false
-    for ox = 0, C.RoomSize do
-        if C.inShape(ox, 12, deck.shape, C.RoomSize, deck.chamfer) then
-            local sq = U.square(rx + ox, ry + 12, deck.z, false)
-            wallOK = sq ~= nil and U.findSprite(sq, C.Sprites.wallW) ~= nil
-            break
+    local absent, first = 0, nil
+    for _, o in ipairs(lay.objects) do
+        local sq = U.square(rx + o[1], ry + o[2], deck.z, false)
+        local found = false
+        if sq then
+            if o[4] == "dW" or o[4] == "dN" then
+                U.try("doorScan", function()
+                    local list = sq:getSpecialObjects()
+                    for i = 0, list:size() - 1 do
+                        local d = list:get(i)
+                        if instanceof(d, "IsoDoor") and d:getNorth() == (o[4] == "dN") then found = true end
+                    end
+                end)
+            else
+                found = U.findSprite(sq, o[3]) ~= nil
+            end
+        end
+        if not found then
+            absent = absent + 1
+            first = first or string.format("%s at %d,%d", tostring(o[5] or o[3]), o[1], o[2])
         end
     end
-    check("deck." .. id .. ".wallW", wallOK, "no wall on the western edge")
+    check("deck." .. id .. ".layout", absent == 0,
+          absent .. " of " .. #lay.objects .. " layout objects missing, first " .. tostring(first))
 
-    -- Decks are joined by the context menu, not by geometry, so what has to
-    -- hold is that the landing and the alcove doorway are both walkable.
     local ax, ay, az = TARDIS.Build.arrivalSpot(deck)
     local land = U.square(ax, ay, az, false)
     check("deck." .. id .. ".landing", land ~= nil and land:getFloor() ~= nil,
@@ -88,17 +98,32 @@ local function checkDeckShell(index)
     -- bookcase, or onto a square with no floor, is the one failure that
     -- strands a player.
     local blocked = 0
-    for dx = -C.Landing.clearance, C.Landing.clearance do
-        for dy = -C.Landing.clearance, C.Landing.clearance do
-            local lx, ly = rx + C.Landing.x + dx, ry + C.Landing.y + dy
-            local sq = U.square(lx, ly, deck.z, false)
-            if not sq or not sq:getFloor() or sq:isSolid() then
-                blocked = blocked + 1
-            end
+    for dx = -1, 1 do
+        for dy = -1, 1 do
+            local sq = U.square(ax + dx, ay + dy, az, false)
+            if not sq or not sq:getFloor() or sq:isSolid() then blocked = blocked + 1 end
         end
     end
     check("deck." .. id .. ".landingClear", blocked == 0,
           blocked .. " squares around the landing are blocked or floorless")
+end
+
+--- The fittings of one piece on a deck, found by their tag.
+local function piecesOn(deck, piece)
+    local lay = TARDIS.Build.layoutOf(deck)
+    local rx, ry = U.deckOrigin(deck)
+    local out, seen = {}, {}
+    for _, o in ipairs(lay.objects) do
+        if o[5] == piece and not seen[o[1] .. "," .. o[2]] then
+            seen[o[1] .. "," .. o[2]] = true
+            local sq = U.square(rx + o[1], ry + o[2], deck.z, false)
+            U.eachObject(sq, function(obj)
+                local md = obj:getModData()
+                if md and md.TARDIS == piece then table.insert(out, obj) end
+            end)
+        end
+    end
+    return out
 end
 
 local function checkDeckContents(index)
@@ -334,139 +359,57 @@ local function buildSteps(player)
         -- it rides along with that deck rather than waiting until the end.
         if index == 1 then
             add("sonic case", function()
-                local rx, ry = U.deckOrigin(deck)
-                local sq = U.square(rx + C.SonicBox.x, ry + C.SonicBox.y, deck.z, false)
                 local held = 0
-                if sq then
-                    U.eachObject(sq, function(o)
-                        local md = o:getModData()
-                        if not (md and md.TARDIS == "sonic") then return end
-                        local c = U.containerOf(o)
-                        if not c then return end
-                        U.try("sonicItems", function()
-                            local items = c:getItems()
-                            for i = 0, items:size() - 1 do
-                                local it = items:get(i)
-                                if it and it:getFullType() == C.SonicItem then
-                                    held = held + 1
-                                end
-                            end
-                        end)
-                    end)
-                end
-                check("sonic.case", held == C.SonicCount,
-                      "expected " .. C.SonicCount .. " screwdrivers beside the console, found "
-                      .. held)
-                return DONE
-            end)
-
-            -- The console is a container item, and the only thing that
-            -- settles whether the hold exists is reading it back off the
-            -- square: a plain item and a container item look identical until
-            -- something asks one of them for an inventory.
-            add("console hold", function()
-                local rx, ry = U.deckOrigin(deck)
-                local sq = U.square(rx + 12, ry + 12, deck.z, false)
-                local console, legacy, count = nil, 0, 0
-                if sq then
-                    U.try("holdScan", function()
-                        local items = sq:getWorldObjects()
-                        if not items then return end
+                for _, o in ipairs(piecesOn(deck, "sonic_case")) do
+                    local c = U.containerOf(o)
+                    U.try("sonicItems", function()
+                        local items = c:getItems()
                         for i = 0, items:size() - 1 do
-                            local wo = items:get(i)
-                            local item = wo and wo:getItem()
-                            local id = item and item:getFullType()
-                            if id == C.ConsoleItem then
-                                console = item
-                            elseif id == C.LegacyConsoleItem then
-                                legacy = legacy + 1
-                            end
+                            if items:get(i):getFullType() == C.SonicItem then held = held + 1 end
                         end
                     end)
                 end
-                check("console.present", console ~= nil,
-                      "no console item on the centre square")
-                check("console.legacyGone", legacy == 0,
-                      legacy .. " old plain console item(s) still standing")
-
-                local hold = console and U.try("holdInventory", function()
-                    return console:getInventory()
-                end)
-                check("console.hold", hold ~= nil,
-                      "the console item carries no container")
-                if hold then
-                    U.try("holdCount", function()
-                        local items = hold:getItems()
-                        count = items and items:size() or 0
-                    end)
-                    -- Only that it was stocked, not with what: the hold is
-                    -- the player's the moment they open it.
-                    check("console.stocked", count > 0, "the hold is empty")
-                    local weight = U.try("holdWeight", function()
-                        return hold:getCapacityWeight()
-                    end) or -1
-                    local cap = U.try("holdCapacity", function()
-                        return hold:getCapacity()
-                    end) or -1
-                    -- The engine clamps an item's container to 50 minus the
-                    -- item's own weight, so a console that is too heavy reads
-                    -- as negative capacity: everything can come out and
-                    -- nothing can go back in.
-                    check("console.capacity", cap > 0,
-                          "hold capacity is " .. cap .. "; the console item is too heavy")
-                    check("console.roomLeft", weight <= cap,
-                          "hold holds " .. math.floor(weight) .. " of " .. cap
-                          .. "; the spill into the ring did not run")
-                    info("console hold: %d items, %.0f of %d capacity",
-                         count, weight, cap)
-                end
-
-                -- The ring is the rest of the hold, and the only part of it
-                -- that can be made large.
-                local ring, ringCap = 0, 0
-                for _, spot in ipairs(C.ConsoleHold.spots) do
-                    local csq = U.square(rx + spot[1], ry + spot[2], deck.z, false)
-                    if csq then
-                        U.eachObject(csq, function(o)
-                            local md = o:getModData()
-                            if not (md and md.TARDIS == "hold") then return end
-                            local c = U.containerOf(o)
-                            if not c then return end
-                            ring = ring + 1
-                            ringCap = ringCap + (U.try("ringCapacity", function()
-                                return c:getCapacity()
-                            end) or 0)
-                        end)
-                    end
-                end
-                check("console.ring", ring == #C.ConsoleHold.spots,
-                      "expected " .. #C.ConsoleHold.spots
-                      .. " hold crates around the console, found " .. ring)
-                info("console ring: %d crates, %d capacity", ring, ringCap)
+                check("sonic.case", held == C.SonicCount,
+                      "expected " .. C.SonicCount .. " screwdrivers in the case, found " .. held)
                 return DONE
             end)
 
-            -- The galley corner. A sprite that does not land leaves an empty
-            -- square and no error anywhere, so the sinks are checked by
-            -- reading the squares back rather than by trusting the placement.
-            add("console galley", function()
-                local rx, ry = U.deckOrigin(deck)
-                local function tagged(ox, oy, want)
-                    local gsq = U.square(rx + ox, ry + oy, deck.z, false)
-                    local found = false
-                    if gsq then
-                        U.eachObject(gsq, function(o)
-                            local md = o:getModData()
-                            if md and md.TARDIS == want then found = true end
-                        end)
+            -- The hold is the console and the roundel lockers: containers of
+            -- 100 each, with the kit packed across them on a fresh world.
+            add("console hold", function()
+                local n, items, cap, over = 0, 0, 0, 0
+                for _, piece in ipairs({ "console", "hold_locker" }) do
+                    -- The console covers four squares; count it once.
+                    local seen = {}
+                    for _, o in ipairs(piecesOn(deck, piece)) do
+                        local c = U.containerOf(o)
+                        if c and not seen[c] then
+                            seen[c] = true
+                            n = n + 1
+                            local ccap = U.try("cap", function() return c:getCapacity() end) or 0
+                            local have = U.try("have", function() return c:getCapacityWeight() end) or 0
+                            cap = cap + ccap
+                            items = items + (U.try("count", function() return c:getItems():size() end) or 0)
+                            if have > ccap then over = over + 1 end
+                        end
                     end
-                    return found
                 end
-                check("galley.sink", tagged(5, 20, "sink"),
-                      "no sink at the head of the galley run")
-                check("galley.oven", tagged(6, 20, "oven"), "no oven")
-                check("galley.aisleClear", not tagged(6, 21, "counter"),
-                      "row 21 should be the aisle in front of the run")
+                check("console.hold", n >= 7, "expected the console and six lockers, found " .. n)
+                check("console.stocked", items > 0, "the hold is empty")
+                check("console.roomLeft", over == 0, over .. " hold container(s) packed past capacity")
+                info("console hold: %d containers, %d items, %d capacity", n, items, cap)
+                return DONE
+            end)
+
+            -- The galley corner: the range must be a real stove and the sink
+            -- must hold water, and neither is visible from the sprite.
+            add("console galley", function()
+                local ranges = piecesOn(deck, "kitchen_range")
+                check("galley.range", #ranges == 1 and instanceof(ranges[1], "IsoStove"),
+                      "the range is missing or not an IsoStove")
+                local sinks = piecesOn(deck, "kitchen_sink")
+                local cap = sinks[1] and U.try("sinkCap", function() return sinks[1]:getFluidCapacity() end) or 0
+                check("galley.sink", cap > 0, "the galley sink has no water store")
                 return DONE
             end)
         end
@@ -484,7 +427,8 @@ local function buildSteps(player)
                     if sq then
                         U.eachObject(sq, function(o)
                             local md = o:getModData()
-                            if md and md.TARDIS == "sink" then
+                            local use = md and md.TARDIS and TARDIS.Layout.uses[md.TARDIS]
+                            if use and use.water then
                                 found = found + 1
                                 local a = U.try("amt", function() return o:getFluidAmount() end)
                                 if a and a > 0 then filled = filled + 1 end
@@ -494,7 +438,7 @@ local function buildSteps(player)
                 end
             end
         end
-        check("water.fixtures", found > 0, "no sinks found")
+        check("water.fixtures", found > 0, "no water fittings found")
         check("water.filled", filled > 0, found .. " sinks, none holding water")
         info("water: %d sinks, %d holding water", found, filled)
         return DONE
@@ -507,9 +451,10 @@ local function buildSteps(player)
         end
         local deck = C.Decks[6]
         local rx, ry = U.deckOrigin(deck)
+        local b = TARDIS.Build.layoutOf(deck).beds
         local plants = 0
-        for ox = 2, 13 do
-            for oy = 2, 21 do
+        for ox = b.x0, b.x1 do
+            for oy = b.y0, b.y1 do
                 local sq = U.square(rx + ox, ry + oy, deck.z, false)
                 if sq then
                     local p = U.try("cropAt", function()
@@ -519,7 +464,7 @@ local function buildSteps(player)
                 end
             end
         end
-        check("crops.sown", plants > 0, "no plots on the hydroponics deck")
+        check("crops.sown", plants > 0, "no plots in the gardens")
         info("crops: %d plots", plants)
         return DONE
     end)

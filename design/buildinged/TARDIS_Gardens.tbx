@@ -1,0 +1,195 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<building version="3" width="25" height="20" ExteriorWall="2" ExteriorWallTrim="0" Door="7" DoorFrame="0" Window="0" Curtains="0" Shutters="0" Stairs="0" RoofCap="0" RoofSlope="0" RoofTop="0" GrimeWall="0">
+ <properties>
+  <property name="Description" value="The TARDIS: Gardens. Drafted by tools/gen_tardis_decks.py; see INTERIOR.md" />
+  <property name="Mod" value="TARDIS" />
+  <property name="Generator" value="gen_tardis_decks" />
+  <property name="Deck" value="growing" />
+  <property name="Landing" value="15,10" />
+  <property name="Z" value="0" />
+  <property name="Beds" value="2,2,13,17" />
+ </properties>
+ <tile_entry category="interior_walls">
+  <tile enum="West" tile="tardis_interior_01_000" />
+  <tile enum="North" tile="tardis_interior_01_001" />
+  <tile enum="NorthWest" tile="tardis_interior_01_002" />
+  <tile enum="SouthEast" tile="tardis_interior_01_003" />
+  <tile enum="WestWindow" tile="" />
+  <tile enum="NorthWindow" tile="" />
+  <tile enum="WestDoor" tile="tardis_interior_01_004" />
+  <tile enum="NorthDoor" tile="tardis_interior_01_005" />
+ </tile_entry>
+ <tile_entry category="interior_walls">
+  <tile enum="West" tile="tardis_interior_01_008" />
+  <tile enum="North" tile="tardis_interior_01_009" />
+  <tile enum="NorthWest" tile="tardis_interior_01_010" />
+  <tile enum="SouthEast" tile="tardis_interior_01_011" />
+  <tile enum="WestWindow" tile="" />
+  <tile enum="NorthWindow" tile="" />
+  <tile enum="WestDoor" tile="tardis_interior_01_012" />
+  <tile enum="NorthDoor" tile="tardis_interior_01_013" />
+ </tile_entry>
+ <tile_entry category="interior_walls">
+  <tile enum="West" tile="tardis_interior_01_016" />
+  <tile enum="North" tile="tardis_interior_01_017" />
+  <tile enum="NorthWest" tile="tardis_interior_01_018" />
+  <tile enum="SouthEast" tile="tardis_interior_01_019" />
+  <tile enum="WestWindow" tile="" />
+  <tile enum="NorthWindow" tile="" />
+  <tile enum="WestDoor" tile="tardis_interior_01_020" />
+  <tile enum="NorthDoor" tile="tardis_interior_01_021" />
+ </tile_entry>
+ <tile_entry category="interior_walls">
+  <tile enum="West" tile="tardis_interior_01_024" />
+  <tile enum="North" tile="tardis_interior_01_025" />
+  <tile enum="NorthWest" tile="tardis_interior_01_026" />
+  <tile enum="SouthEast" tile="tardis_interior_01_027" />
+  <tile enum="WestWindow" tile="" />
+  <tile enum="NorthWindow" tile="" />
+  <tile enum="WestDoor" tile="tardis_interior_01_028" />
+  <tile enum="NorthDoor" tile="tardis_interior_01_029" />
+ </tile_entry>
+ <tile_entry category="floors">
+  <tile enum="Floor" tile="blends_natural_01_64" />
+ </tile_entry>
+ <tile_entry category="floors">
+  <tile enum="Floor" tile="tardis_interior_01_037" />
+ </tile_entry>
+ <tile_entry category="doors">
+  <tile enum="West" tile="tardis_interior_01_040" />
+  <tile enum="North" tile="tardis_interior_01_041" />
+  <tile enum="WestOpen" tile="tardis_interior_01_042" />
+  <tile enum="NorthOpen" tile="tardis_interior_01_043" />
+ </tile_entry>
+ <furniture layer="WallFurniture">
+  <entry orient="W">
+   <tile x="0" y="0" name="tardis_interior_02_148" />
+  </entry>
+  <entry orient="N">
+   <tile x="0" y="0" name="tardis_interior_02_149" />
+  </entry>
+ </furniture>
+ <furniture>
+  <entry orient="W">
+   <tile x="0" y="0" name="tardis_interior_02_122" />
+  </entry>
+  <entry orient="N">
+   <tile x="0" y="0" name="tardis_interior_02_123" />
+  </entry>
+ </furniture>
+ <furniture>
+  <entry orient="W">
+   <tile x="0" y="0" name="tardis_interior_02_118" />
+   <tile x="0" y="1" name="tardis_interior_02_119" />
+  </entry>
+  <entry orient="N">
+   <tile x="0" y="0" name="tardis_interior_02_120" />
+   <tile x="1" y="0" name="tardis_interior_02_121" />
+  </entry>
+ </furniture>
+ <furniture>
+  <entry orient="W">
+   <tile x="0" y="0" name="tardis_interior_02_124" />
+   <tile x="0" y="1" name="tardis_interior_02_125" />
+  </entry>
+  <entry orient="N">
+   <tile x="0" y="0" name="tardis_interior_02_126" />
+   <tile x="1" y="0" name="tardis_interior_02_127" />
+  </entry>
+ </furniture>
+ <furniture>
+  <entry orient="W">
+   <tile x="0" y="0" name="tardis_interior_02_128" />
+   <tile x="0" y="1" name="tardis_interior_02_129" />
+  </entry>
+  <entry orient="N">
+   <tile x="0" y="0" name="tardis_interior_02_130" />
+   <tile x="1" y="0" name="tardis_interior_02_131" />
+  </entry>
+  <entry orient="E">
+   <tile x="0" y="0" name="tardis_interior_02_132" />
+   <tile x="0" y="1" name="tardis_interior_02_133" />
+  </entry>
+  <entry orient="S">
+   <tile x="0" y="0" name="tardis_interior_02_134" />
+   <tile x="1" y="0" name="tardis_interior_02_135" />
+  </entry>
+ </furniture>
+ <furniture>
+  <entry orient="W">
+   <tile x="0" y="0" name="tardis_interior_02_117" />
+  </entry>
+ </furniture>
+ <furniture>
+  <entry orient="W">
+   <tile x="0" y="0" name="tardis_interior_02_099" />
+  </entry>
+  <entry orient="N">
+   <tile x="0" y="0" name="tardis_interior_02_100" />
+  </entry>
+ </furniture>
+ <furniture layer="WallFurniture">
+  <entry orient="W">
+   <tile x="0" y="0" name="tardis_interior_02_142" />
+  </entry>
+  <entry orient="N">
+   <tile x="0" y="0" name="tardis_interior_02_143" />
+  </entry>
+ </furniture>
+ <user_tiles />
+ <used_tiles>1 2 3 4 5 6 7</used_tiles>
+ <used_furniture>0 1 2 3 4 5 6 7</used_furniture>
+ <room Name="Hydroponic Garden" InternalName="garden" Color="120 80 50" InteriorWall="2" InteriorWallTrim="0" Floor="5" GrimeFloor="0" GrimeWall="0" />
+ <room Name="Stable" InternalName="stable" Color="110 115 120" InteriorWall="3" InteriorWallTrim="0" Floor="6" GrimeFloor="0" GrimeWall="0" />
+ <floor>
+  <rooms>
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2
+</rooms>
+  <object type="door" x="17" y="10" dir="W" Tile="7" FrameTile="0" />
+  <object type="furniture" FurnitureTiles="0" orient="N" x="2" y="0" />
+  <object type="furniture" FurnitureTiles="0" orient="N" x="4" y="0" />
+  <object type="furniture" FurnitureTiles="0" orient="N" x="6" y="0" />
+  <object type="furniture" FurnitureTiles="0" orient="N" x="8" y="0" />
+  <object type="furniture" FurnitureTiles="0" orient="N" x="10" y="0" />
+  <object type="furniture" FurnitureTiles="0" orient="N" x="12" y="0" />
+  <object type="furniture" FurnitureTiles="0" orient="N" x="14" y="0" />
+  <object type="furniture" FurnitureTiles="0" orient="W" x="0" y="3" />
+  <object type="furniture" FurnitureTiles="0" orient="W" x="0" y="7" />
+  <object type="furniture" FurnitureTiles="0" orient="W" x="0" y="11" />
+  <object type="furniture" FurnitureTiles="0" orient="W" x="0" y="15" />
+  <object type="furniture" FurnitureTiles="1" orient="N" x="0" y="0" />
+  <object type="furniture" FurnitureTiles="1" orient="N" x="1" y="0" />
+  <object type="furniture" FurnitureTiles="2" orient="N" x="15" y="0" />
+  <object type="furniture" FurnitureTiles="3" orient="W" x="0" y="18" />
+  <object type="furniture" FurnitureTiles="4" orient="S" x="5" y="19" />
+  <object type="furniture" FurnitureTiles="4" orient="S" x="9" y="19" />
+  <object type="furniture" FurnitureTiles="5" orient="W" x="16" y="19" />
+  <object type="furniture" FurnitureTiles="5" orient="W" x="0" y="1" />
+  <object type="furniture" FurnitureTiles="1" orient="W" x="0" y="5" />
+  <object type="furniture" FurnitureTiles="3" orient="N" x="18" y="0" />
+  <object type="furniture" FurnitureTiles="3" orient="N" x="21" y="0" />
+  <object type="furniture" FurnitureTiles="6" orient="N" x="23" y="0" />
+  <object type="furniture" FurnitureTiles="6" orient="N" x="24" y="0" />
+  <object type="furniture" FurnitureTiles="7" orient="W" x="17" y="5" />
+  <object type="furniture" FurnitureTiles="7" orient="W" x="17" y="15" />
+ </floor>
+</building>
